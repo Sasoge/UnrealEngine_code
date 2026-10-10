@@ -1,0 +1,33 @@
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "ScreenPass.ush"
+
+// [DeferredToon] Per-view temporal accumulation for the scalar native shadow
+// buffer. VSM/SMRT supplies a new blue-noise sample each frame; averaging the
+// current value with the previous value removes that sequence from the custom
+// pre-tonemap path while leaving native SceneColor lighting untouched.
+
+Texture2D CurrentShadowBuffer;
+Texture2D PreviousShadowBuffer;
+RWTexture2D<float4> StableShadowBuffer;
+int2 ViewRectMin;
+int2 ViewRectSize;
+float CurrentFrameWeight;
+uint bHistoryValid;
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const int2 PixelPos = ViewRectMin + int2(DispatchThreadId.xy);
+	if (DispatchThreadId.x >= uint(ViewRectSize.x) || DispatchThreadId.y >= uint(ViewRectSize.y))
+	{
+		return;
+	}
+
+	const float CurrentValue = CurrentShadowBuffer.Load(int3(PixelPos, 0)).r;
+	const float PreviousValue = PreviousShadowBuffer.Load(int3(PixelPos, 0)).r;
+	const float StableValue = bHistoryValid != 0
+		? lerp(PreviousValue, CurrentValue, saturate(CurrentFrameWeight))
+		: CurrentValue;
+	StableShadowBuffer[PixelPos] = float4(StableValue, 0.0f, 0.0f, 0.0f);
+}

@@ -1,0 +1,83 @@
+// ToonOutline.usf
+#include "Common.ush"  
+#include "/Engine/Generated/Material.ush"  
+#include "/Engine/Generated/VertexFactory.ush"  
+// 顶点着色器到像素着色器的数据结构体
+struct FSimpleMeshPassVSToPS  
+{  
+	// 顶点工厂插值数据（包含UV、颜色等需要在光栅化阶段插值的信息）
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;  
+	// 裁剪空间中的顶点位置（SV_POSITION语义，必须为float4）
+	float4 Position : SV_POSITION;  
+};  
+
+// 从C++端传入的轮廓线宽度
+float OutlineWidth;
+// 从C++端传入的轮廓线颜色（RGB）
+float3 OutlineColor;  
+
+#if VERTEXSHADER  
+// 顶点着色器主函数
+void MainVS(  
+	FVertexFactoryInput Input,    // 顶点工厂提供的输入数据（包含顶点位置、法线、UV等）
+	out FSimpleMeshPassVSToPS Output) // 输出到像素着色器的数据
+{  
+	// 解析视图相关数据（投影矩阵、视图矩阵等）
+	ResolvedView = ResolveView();
+	
+	// 获取顶点工厂中间数据（对输入数据进行初步处理）
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);  
+	
+	// 获取世界空间中的顶点位置
+	float4 PosWS = VertexFactoryGetWorldPosition(Input, VFIntermediates);  
+	
+	// 获取世界空间中的顶点法线
+	float3 NormalWS = VertexFactoryGetWorldNormal(Input, VFIntermediates);  
+	
+	// 获取切线空间到局部空间的转换矩阵（TBN矩阵的逆）
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);  
+
+	// 组装材质顶点参数（供材质系统使用，如世界位置偏移等）
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, PosWS.xyz, TangentToLocal);    
+	
+	// 可选：应用材质的世界位置偏移（当前被注释掉）
+	//PosWS.xyz += GetMaterialWorldPositionOffset(VertexParameters);  
+
+	// 获取光栅化所需的世界位置（考虑实例化、骨骼动画等变换）
+	float4 RasterizedWorldPosition = VertexFactoryGetRasterizedWorldPosition(Input, VFIntermediates, PosWS);  
+
+	// 获取需要在像素着色器间插值的数据
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToPS(Input, VFIntermediates, VertexParameters);    
+	
+	// 将世界空间位置转换到裁剪空间
+	Output.Position = mul(RasterizedWorldPosition, ResolvedView.TranslatedWorldToClip);  
+	
+	// 将世界空间法线转换到裁剪空间，并提取屏幕空间的扩展方向
+	// 法线只取xy分量并归一化，得到屏幕上顶点应该扩展的方向
+	float2 ExtentDir = normalize(mul(float4(NormalWS, 1.0f), ResolvedView.TranslatedWorldToClip).xy);    
+	
+	// 计算轮廓扩展的偏移量
+	// Offset计算公式：clamp(最小值0, 最大值0.5, Position.w * 轮廓宽度 * 0.01)
+	// Position.w包含深度信息，乘以w可以使轮廓在远处变窄，近处变宽（透视校正）
+	float Offset = clamp(0.0f, 0.5f, Output.Position.w * OutlineWidth * 0.01f);    
+	
+	// TODO: 添加自定义顶点工厂对顶点颜色的支持
+	// 可选：使用顶点颜色的Alpha通道来调节轮廓宽度
+	Offset *= VertexParameters.VertexColor.a;    
+
+	// 在屏幕空间沿法线方向扩展顶点位置
+	Output.Position.xy += ExtentDir * Offset;  
+}  
+#endif // VERTEXSHADER  
+
+// 像素着色器主函数
+void MainPS(  
+	FSimpleMeshPassVSToPS Input,      // 从顶点着色器传入的插值后数据
+	out float4 OutColor : SV_Target0) // 输出到渲染目标0的颜色
+{  
+	// 直接输出纯色轮廓颜色（Alpha = 1.0，完全不透明）
+	OutColor = float4(OutlineColor, 1.0);  
+	
+	// 可选的黑色轮廓（被注释掉）
+	//OutColor = float4(0.0, 0.0, 0.0, 1.0);  
+}

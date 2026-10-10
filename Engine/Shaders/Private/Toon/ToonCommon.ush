@@ -1,0 +1,54 @@
+﻿// ----------------------------------YK Engine Start----------------------------------
+
+#pragma once
+
+
+
+float LinearStep(float MinValue, float MaxValue, float Value)
+{
+	return max(0, min(1, (Value - MinValue) / (MaxValue - MinValue)));
+}
+
+float Sigmoid(float x) 
+{
+	return 1.0f / (1.0f + exp(-x));
+}
+bool IsToonMainLight()
+{
+#if IS_TOON_MAINLIGHT
+	return true;
+#else
+	return false;
+#endif
+}
+
+float BoxSDF(float3 Position, float3 BoxExtent)
+{
+	float3 q = abs(Position) - BoxExtent;
+	return length(max(q, 0.0f)) + min(max(q.x, max(q.y, q.z)), 0.0f);
+}
+// 读取ToonActorTexture里的Pivot
+float3 GetToonPivot(uint ObjectID)
+{
+	int3 UV = 0;
+	UV.x = ObjectID % 16;
+	UV.y = ObjectID / 16;
+	float3 Pivot = SceneTexturesStruct.ToonActorTexture.Load(UV).xyz;
+	return Pivot;
+}
+float2 TranslatedPositionToScreenUV(float3 TranslatedWorldPosition)
+{
+	float4 ViewPosition = mul(float4(TranslatedWorldPosition, 1.0), View.TranslatedWorldToView);
+	float2 ScreenUV = float2(ViewPosition.xy /  (ViewPosition.z * GetTanHalfFieldOfView().xy));
+	ScreenUV = ScreenUV * float2(0.5, -0.5) + float2(0.5, 0.5);
+	return saturate(ScreenUV);
+}
+
+float2 TranslatedPositionToBufferUV(float3 TranslatedWorldPosition)
+{
+	float2 ScreenUV = TranslatedPositionToScreenUV(TranslatedWorldPosition);
+	float2 BufferUV = (ScreenUV * View.ViewSizeAndInvSize.xy + View.ViewRectMin.xy) * View.BufferSizeAndInvSize.zw;
+	return BufferUV;
+}
+
+// ----------------------------------YK Engine End----------------------------------

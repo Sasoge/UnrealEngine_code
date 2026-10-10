@@ -1,0 +1,82 @@
+﻿// ----------------------------------YK Engine Start----------------------------------
+// Toon Multiple light sources
+
+#pragma once
+
+// FLATTEN_RANGE_MODE
+#define RELATIVE_DISTANCE 0
+#define ABSOLUTE_DISTANCE 1
+
+// 用于传递Toon多光源计算需要的数据
+struct FToonLight
+{
+	// 与FLightShaderParameters里的Toon多光源数据对应
+	float ToonLightSmooth;
+	float ToonLightOffset;
+	float ToonLightFlatten;
+	float FlattenRange;
+	// Toon多光源计算需要的其他数据
+	bool IsToon;
+	bool IsDirectionalLight;
+	float DirectionalLightDistance; // 通过ToonActor Pivot计算的距离
+	
+};
+
+FToonLight InitToonLight()
+{
+	FToonLight ToonLight;
+	ToonLight.ToonLightSmooth = 0.5f;
+	ToonLight.ToonLightOffset = 0.0f;
+	ToonLight.ToonLightFlatten = 0.0f;
+	ToonLight.FlattenRange = 200.0f;
+	
+	ToonLight.IsToon = false;
+	ToonLight.IsDirectionalLight = false;
+	ToonLight.DirectionalLightDistance = 0.0f;
+	
+	return ToonLight;
+}
+// LinearDistance：灯光与着色点的线性距离
+// 对于点光源来说，LinearFalloff = distance(灯光世界空间坐标, 着色点世界空间坐标)
+float3 FlatNormal(FToonLight ToonLight, float3 LightVector, float3 Normal, float LinearDistance)
+{
+	// 这里乘上个1.5是为了让距离灯光为FlattenRange的点，它的ToonDistance等于2/3.
+	// 这样该点插值后的FlattedNormal与光源的夹角会等于60°，计算出来的NoL就会等于0.5
+	float ToonDistance = saturate(LinearDistance / (ToonLight.FlattenRange * 1.5f));
+	
+	float3 Temp = cross(LightVector, Normal);
+	float3 LightTangent = normalize(cross(Temp, LightVector));
+	// 越靠近光源的点，法线越接近LightVector；越远离光源的点，法线越接近LightTangent
+	float3 FlattedNormal = lerp(LightVector, LightTangent, ToonDistance);
+	
+	FlattedNormal =	normalize(lerp(Normal, FlattedNormal, ToonLight.ToonLightFlatten));
+	
+	return ToonLight.IsToon ? FlattedNormal : Normal;
+}
+// WorldPosition为着色点的世界空间坐标，不是光源的世界空间坐标
+// Pivot为ToonActor的轴心点，保存在ToonActorTexture
+void MakeDirectionalLightDistance(float3 LightVector, float3 WorldPosition, float3 Pivot, float FlattenRange, inout float DirectionalLightDistance)
+{
+	if ( all( Pivot == 0.0f ) ) return ;
+
+	float3 ToPivot = Pivot - WorldPosition;
+	float Distance = dot(ToPivot, LightVector);
+	// 为了让Pivot处的Distance等于FlattenRange
+	Distance += FlattenRange;
+	
+	DirectionalLightDistance = Distance;
+}
+
+void MakeFlattenRange(float3 LightPosition, float3 Pivot, inout float FlattenRange)
+{
+#if FLATTEN_RANGE_MODE == ABSOLUTE_DISTANCE
+	return ;
+#endif
+	
+	if ( all( Pivot == 0.0f ) ) return ;
+
+	// 当FLATTEN_RANGE_MODE == RELATIVE_DISTANCE，传入的FlattenRange其实是FlattenOffset
+	FlattenRange += length(LightPosition - Pivot);
+}
+
+// ----------------------------------YK Engine End----------------------------------

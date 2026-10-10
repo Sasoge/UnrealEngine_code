@@ -1,0 +1,59 @@
+﻿// Toon Material Output
+#pragma once
+
+#include "../Common.ush"
+#include "ToonBufferCommon.ush"
+
+FToonBuffer GetToonBuffer(FMaterialPixelParameters MaterialParameters)
+{
+	FToonBuffer ToonBuffer;
+	ToonBuffer.SelfID = 0;
+	ToonBuffer.ObjectID = 0;
+	ToonBuffer.ToonModel = 0;
+	ToonBuffer.ShadowCastFlag = 0;
+	ToonBuffer.HairShadowOffset = 0.0f;
+	ToonBuffer.SpecularSmoothness = 0.5f;
+	ToonBuffer.SpecularOffset = 0.0f;
+	ToonBuffer.ToonBufferC = 0.0f;
+#if	NUM_MATERIAL_OUTPUTS_GETTOONBUFFEROUTPUT
+	float SelfIDValue = clamp(GetToonBufferOutput0(MaterialParameters), 0.0f, 255.0f);
+	float ObjectIDValue = clamp(GetToonBufferOutput1(MaterialParameters), 0.0f, 255.0f);
+	float ToonModelValue = clamp(GetToonBufferOutput2(MaterialParameters), 0.0f, 7.0f);
+	float ShadowCastFlagValue = clamp(GetToonBufferOutput3(MaterialParameters), 0.0f, 32.0f);
+
+	// Accept either normalized [0,1) authoring values or explicit integer-range values.
+	// Keep exact 1.0 as integer "1" to avoid ambiguity for enum/bitfield inputs.
+	SelfIDValue = (SelfIDValue < 1.0f) ? (SelfIDValue * 255.0f) : SelfIDValue;
+	ObjectIDValue = (ObjectIDValue < 1.0f) ? (ObjectIDValue * 255.0f) : ObjectIDValue;
+	ToonModelValue = (ToonModelValue < 1.0f) ? (ToonModelValue * 7.0f) : ToonModelValue;
+	ShadowCastFlagValue = (ShadowCastFlagValue < 1.0f) ? (ShadowCastFlagValue * 32.0f) : ShadowCastFlagValue;
+
+	ToonBuffer.SelfID = (uint)round(SelfIDValue);
+	ToonBuffer.ObjectID = (uint)round(ObjectIDValue);
+	ToonBuffer.ToonModel = (uint)round(ToonModelValue);
+	ToonBuffer.ShadowCastFlag = (uint)round(ShadowCastFlagValue);
+	ToonBuffer.HairShadowOffset = GetToonBufferOutput4(MaterialParameters);
+	ToonBuffer.SpecularSmoothness = GetToonBufferOutput5(MaterialParameters);
+	ToonBuffer.SpecularOffset = GetToonBufferOutput6(MaterialParameters);
+	ToonBuffer.ToonBufferC = GetToonBufferOutput7(MaterialParameters);
+#endif
+	return ToonBuffer;
+}
+
+FToonPayloadData GetToonPayloadData(FMaterialPixelParameters MaterialParameters)
+{
+	FToonBuffer ToonBuffer = GetToonBuffer(MaterialParameters);
+	
+	return GetToonPayloadByToonBuffer(ToonBuffer);
+}
+// Toon Light Output Step 3
+float3 GetToonLight(FMaterialPixelParameters MaterialParameters)
+{
+	float3 ToonLight = 0;
+	
+#if	NUM_MATERIAL_OUTPUTS_GETTOONLIGHTOUTPUT > 0
+	ToonLight = GetToonLightOutput0(MaterialParameters);
+#endif
+
+	return ToonLight;
+}

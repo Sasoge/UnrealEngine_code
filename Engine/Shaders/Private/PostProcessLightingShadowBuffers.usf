@@ -1,0 +1,35 @@
+// [LightingShadowBuffer] Reversible grayscale inspection of the separated
+// deferred lighting and shadow accumulation textures.  This pass runs at the
+// final post-processing output after tone mapping/upscaling; it never writes
+// either source accumulation target.
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "ScreenPass.ush"
+
+SCREEN_PASS_TEXTURE_VIEWPORT(Input)
+SCREEN_PASS_TEXTURE_VIEWPORT(Output)
+
+Texture2D DebugTexture;
+SamplerState DebugTextureSampler;
+
+uint DebugMode;
+float DebugScale;
+
+void MainPS(
+	noperspective float4 UVAndScreenPos : TEXCOORD0,
+	FStereoVSOutput StereoOutput,
+	float4 SvPosition : SV_POSITION,
+	out float4 OutColor : SV_Target0)
+{
+	const float2 ClampedUV = clamp(UVAndScreenPos.xy, Input_UVViewportBilinearMin, Input_UVViewportBilinearMax);
+	const float4 Value = Texture2DSampleLevel(DebugTexture, DebugTextureSampler, ClampedUV, 0);
+
+	// LightingBuffer is HDR RGB direct lighting, so luminance keeps material and
+	// light response visible.  ShadowBuffer is scalar positive accumulation.
+	const float Scalar = (DebugMode == 1)
+		? dot(Value.rgb, float3(0.2126f, 0.7152f, 0.0722f))
+		: Value.r;
+	const float Gray = saturate(max(Scalar, 0.0f) * DebugScale);
+	OutColor = float4(Gray.xxx, 1.0f);
+}

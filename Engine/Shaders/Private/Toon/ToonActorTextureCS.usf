@@ -1,0 +1,36 @@
+﻿// ----------------------------------YK Engine Start-----------------------------------------
+// ToonActorTexture
+#include "../Common.ush"
+
+#ifndef THREADGROUP_SIZE
+#error THREADGROUP_SIZE must be defined
+#endif
+
+struct FToonActorData
+{
+	float3 Pivot;
+	uint ID;
+};
+
+RWTexture2D<float4> RWTarget;
+uint NumToonActor;
+StructuredBuffer<FToonActorData> ToonActorDatas;
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void MainCS( uint2 DispatchThreadId : SV_DispatchThreadID )
+{
+	int Index = DispatchThreadId.x + DispatchThreadId.y * 15;
+	uint2 UV = 0;
+	
+	if (Index < NumToonActor)
+	{
+		float3 ActorPivot = ToonActorDatas[Index].Pivot;
+		uint ID = ToonActorDatas[Index].ID;
+		UV.x = uint(ID % 16);
+		UV.y = uint(floor(ID / 16));
+		// 其实只要写入ActorPivot就行，没必要写入ID，我为了方便确认数据有没有写对就把ID也写入了ToonActorTexture
+		RWTarget[UV] = float4(ActorPivot, ID);
+	}
+}
+
+//-------------------------------------YK Engine End------------------------------------------

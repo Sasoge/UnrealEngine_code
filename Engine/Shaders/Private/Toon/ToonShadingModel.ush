@@ -1,0 +1,56 @@
+﻿// Toon Shading
+#pragma once
+
+#include "../ShadingModels.ush"
+
+FAreaLight InitialAreaLight(float SourceRadius, float SoftSourceRadius,float Roughness)
+{
+	FAreaLight AreaLight;
+
+	float InvDist = 1.0f;
+	
+	Roughness = max( Roughness, View.MinRoughness );
+	float a = Pow2( Roughness );
+	
+	AreaLight.SphereSinAlpha = saturate( SourceRadius * InvDist * (1 - a) );
+	AreaLight.SphereSinAlphaSoft = saturate( SoftSourceRadius * InvDist );
+	AreaLight.LineCosSubtended = 1;
+	AreaLight.FalloffColor = 1;
+	AreaLight.Rect = (FRect)0;
+	AreaLight.IsRectAndDiffuseMicroReflWeight = 0;
+	AreaLight.Texture = InitRectTexture();
+	AreaLight.ToonLight = InitToonLight();
+
+	return AreaLight;
+}
+
+// 自定义的PBR BxDF
+FGBufferData InitialGBuffer(half3 BaseColor, half Metallic, half Specular, half Roughness, half3 Normal,
+	half SpecularOffset, half SpecularSmoothness)
+{
+	FGBufferData GBuffer;
+
+	GBuffer.WorldNormal = Normal;
+	GBuffer.WorldTangent = 0.0f;
+	GBuffer.BaseColor = BaseColor;
+	GBuffer.Metallic = Metallic;
+	GBuffer.Specular = Specular;
+	GBuffer.SpecularColor = ComputeF0(Specular, BaseColor, Metallic);//	F0 = lerp(0.08 * Specular, BaseColor, Metallic);
+	GBuffer.DiffuseColor = BaseColor - BaseColor * Metallic;
+	GBuffer.Roughness = Roughness;
+	GBuffer.ShadingModelID = SHADINGMODELID_TOON;
+	
+	GBuffer.ToonBuffer.SpecularOffset = SpecularOffset;
+	GBuffer.ToonBuffer.SpecularSmoothness = SpecularSmoothness;
+	return GBuffer;
+}
+FDirectLighting ToonPBRBxDF(half3 BaseColor, half Metallic, half Specular, half Roughness, half3 Normal,
+		half3 LightVector, half SourceRadius, half SoftSourceRadius, half3 ViewVector,
+		half SpecularOffset = 0.0f, half SpecularSmoothness = 1.0f)
+{
+	FAreaLight AreaLight = InitialAreaLight(SourceRadius, SoftSourceRadius, Roughness);
+	FGBufferData GBuffer = InitialGBuffer(BaseColor, Metallic, Specular, Roughness, Normal, SpecularOffset, SpecularSmoothness);
+	float NoL = saturate(dot(Normal, LightVector));
+	FDirectLighting ToonLighting = ToonBxDFInternal(GBuffer, Normal, ViewVector, LightVector, 1.0f, NoL, AreaLight);
+	return ToonLighting;
+}

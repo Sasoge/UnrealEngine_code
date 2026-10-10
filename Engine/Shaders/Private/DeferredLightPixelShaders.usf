@@ -1,0 +1,1062 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DeferredLightPixelShaders.usf:
+=============================================================================*/
+  
+#if USE_HAIR_LIGHTING == 1
+  #define SUPPORT_CONTACT_SHADOWS 0
+#else
+  #define SUPPORT_CONTACT_SHADOWS 1
+#endif
+#define SUBSTRATE_SSS_TRANSMISSION USE_TRANSMISSION
+
+#if SUBSTRATE_ENABLED 
+  #if SUBSTRATE_TILETYPE == 0
+	#define SUBSTRATE_FASTPATH 1
+  #elif SUBSTRATE_TILETYPE == 1
+	#define SUBSTRATE_SINGLEPATH 1
+  #elif SUBSTRATE_TILETYPE == 2
+	// COMPLEX PATH
+  #elif SUBSTRATE_TILETYPE == 3
+	// COMPLEX SPECIAL PATH
+	#define SUBSTRATE_COMPLEXSPECIALPATH 1
+  #else
+	#error Substrate tile type non-implemented
+  #endif
+#endif
+
+
+//#include "HeterogeneousVolumes/HeterogeneousVolumesVoxelGridTypes.ush"
+#include "HairStrands/HairStrandsVisibilityCommonStruct.ush" 
+#include "Common.ush"
+
+#include "LargeWorldCoordinates.ush"
+
+#include "Substrate/Substrate.ush"
+#include "DeferredShadingCommon.ush"
+#include "DeferredLightingCommon.ush"
+#include "LightDataUniforms.ush"
+
+#if USE_HAIR_LIGHTING == 1
+#include "HairStrands/HairStrandsVisibilityCommon.ush"
+#include "HairStrands/HairStrandsVisibilityUtils.ush"
+#endif
+#include "HairStrands/HairStrandsCommon.ush"
+#include "HairStrands/HairStrandsDeepTransmittanceCommon.ush"
+#include "HairStrands/HairStrandsDeepTransmittanceDualScattering.ush" 
+
+#if USE_ATMOSPHERE_TRANSMITTANCE
+#include "/Engine/Private/SkyAtmosphereCommon.ush"
+#endif
+
+#if USE_CLOUD_TRANSMITTANCE
+#include "VolumetricCloudCommon.ush"
+#endif
+
+#include "Substrate/SubstrateEvaluation.ush"
+#include "Substrate/SubstrateDeferredLighting.ush"
+////////////custom///////////////////
+#include "Toon/ToonBufferCommon.ush"
+#include "Toon/ToonShadingCommon.ush"
+////////////end////////////////////
+#if USE_VIRTUAL_SHADOW_MAP_MASK
+#include "VirtualShadowMaps/VirtualShadowMapMaskBitsCommon.ush"
+#endif
+
+#if USE_ADAPTIVE_VOLUMETRIC_SHADOW_MAP
+#include "HeterogeneousVolumes/HeterogeneousVolumesAdaptiveVolumetricShadowMapSampling.ush"
+
+//#include "HeterogeneousVolumes/HeterogeneousVolumesVoxelGridUtils2.ush"
+//#include "HeterogeneousVolumes/HeterogeneousVolumesRayMarchingUtils.ush"
+#endif // USE_ADAPTIVE_VOLUMETRIC_SHADOW_MAP
+
+// Remap light shape permutation into light type
+#if LIGHT_SOURCE_SHAPE == 0
+#define CURRENT_LIGHT_TYPE LIGHT_TYPE_DIRECTIONAL
+#elif LIGHT_SOURCE_SHAPE == 2
+#define CURRENT_LIGHT_TYPE LIGHT_TYPE_RECT
+#else // LIGHT_SOURCE_SHAPE == 1
+#define CURRENT_LIGHT_TYPE (IsDeferredSpotlight() ? LIGHT_TYPE_SPOT : LIGHT_TYPE_POINT)
+#endif
+
+struct FInputParams
+{
+	float2 PixelPos;
+	float4 ScreenPosition;
+	float2 ScreenUV;
+	float3 ScreenVector;
+};
+
+struct FDerivedParams
+{
+	float3 CameraVector;
+	float3 TranslatedWorldPosition;
+};
+
+FDerivedParams GetDerivedParams(in FInputParams Input, in float SceneDepth)
+{
+	FDerivedParams Out;
+#if LIGHT_SOURCE_SHAPE > 0
+	// With a perspective projection, the clip space position is NDC * Clip.w
+	// With an orthographic projection, clip space is the same as NDC
+	float2 ClipPosition = GetScreenPositionForProjectionType(Input.ScreenPosition.xy / Input.ScreenPosition.w, SceneDepth);
+	Out.TranslatedWorldPosition = mul(float4(ClipPosition, SceneDepth, 1), View.ScreenToTranslatedWorld).xyz;
+	Out.CameraVector = GetCameraVectorFromTranslatedWorldPosition(Out.TranslatedWorldPosition);
+#else
+	Out.TranslatedWorldPosition = Input.ScreenVector * SceneDepth + GetTranslatedWorldCameraPosFromView(Input.PixelPos);
+	Out.CameraVector = normalize(Input.ScreenVector);
+#endif
+	return Out;
+}
+
+Texture2D<uint> LightingChannelsTexture;
+// [LightingShadowBuffer] Explicit resources mirror the deferred-light
+// parameter struct; MRT writes target these resources through RenderTargets.
+Texture2D LightingBufferTexture;
+Texture2D ShadowBufferTexture;
+uint bWriteLightingShadowBuffers;
+
+uint GetLightingChannelMask(float2 UV)
+{
+	uint2 IntegerUV = UV * View.BufferSizeAndInvSize.xy;
+	return LightingChannelsTexture.Load(uint3(IntegerUV, 0)).x;
+}
+
+// [ShadowChannelPrototype] Bit 7 marks a stencil value written by ShadowChannels;
+// ordinary CustomDepth stencil values must not become shadow receivers.
+#define SHADOW_CHANNEL_STENCIL_FLAG 0x80u
+
+bool IsShadowReceiverChannelMatch(uint2 PixelPos)
+{
+	const uint ShadowReceiverChannelMask = DeferredLightUniforms.ShadowReceiverChannelMask;
+	const uint SceneCustomStencil = CalcSceneCustomStencil(PixelPos);
+	return ShadowReceiverChannelMask == 0 ||
+		((SceneCustomStencil & SHADOW_CHANNEL_STENCIL_FLAG) != 0 &&
+		 (ShadowReceiverChannelMask & SceneCustomStencil) != 0);
+}
+
+float GetExposure()
+{
+	return View.PreExposure;
+}
+
+#if USE_VIRTUAL_SHADOW_MAP_MASK
+// One pass projection
+Texture2D<uint4> ShadowMaskBits;
+int VirtualShadowMapId;
+int LightSceneId;
+#endif
+
+float4 GetLightAttenuationFromShadow(in FInputParams InputParams, float SceneDepth, float3 TranslatedWorldPosition)
+{
+	float4 LightAttenuation = float4(1, 1, 1, 1);
+
+#if USE_VIRTUAL_SHADOW_MAP_MASK
+	if (VirtualShadowMapId != INDEX_NONE)
+	{
+		float ShadowMask = GetVirtualShadowMapMaskForLight(
+			ShadowMaskBits[InputParams.PixelPos],
+			uint2(InputParams.PixelPos),
+			SceneDepth,
+			VirtualShadowMapId,
+			TranslatedWorldPosition);
+		return ShadowMask.xxxx;
+	}
+	else
+#endif
+	{
+		return GetPerPixelLightAttenuation(InputParams.ScreenUV);
+	}
+}
+
+// [ShadowChannelPrototype] Evaluate the optional CPU-sampled CurveFloat LUT.
+// The input is normalized local-light distance: 0 at the light center and 1 at
+// the light radius. Directional lights bypass this helper and use factor 1.
+float GetShadowChannelCurveFactor(float NormalizedDistance)
+{
+	if (DeferredLightUniforms.ShadowChannelCurveEnabled == 0)
+	{
+		return 1.0f;
+	}
+
+	const float SamplePosition = saturate(NormalizedDistance) * 15.0f;
+	const uint SampleIndex = min((uint)SamplePosition, 14u);
+	const float Alpha = SamplePosition - (float)SampleIndex;
+	const uint NextSampleIndex = SampleIndex + 1u;
+	const float SampleA = DeferredLightUniforms.ShadowChannelCurveSamples[SampleIndex / 4u][SampleIndex % 4u];
+	const float SampleB = DeferredLightUniforms.ShadowChannelCurveSamples[NextSampleIndex / 4u][NextSampleIndex % 4u];
+	return max(lerp(SampleA, SampleB, Alpha), 0.0f);
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#if USE_ATMOSPHERE_TRANSMITTANCE
+
+float3 GetAtmosphericLightTransmittance(in float3 StableTranslatedLargeWorldPosition, in float2 ScreenUV, in float3 LightDirection)
+{
+	// The following is the only way to retrieve a world space position that is always stable under camera movement + long view distance. (DerivedParams.WorldPosition is not stable)
+	const float3 PlanetCenterToWorldPos = (StableTranslatedLargeWorldPosition - View.SkyPlanetTranslatedWorldCenterAndViewHeight.xyz) * CM_TO_SKY_UNIT;
+
+	const float3 AtmosphereTransmittance = GetAtmosphereTransmittance(
+		PlanetCenterToWorldPos, LightDirection, View.SkyAtmosphereBottomRadiusKm, View.SkyAtmosphereTopRadiusKm,
+		View.TransmittanceLutTexture, View.TransmittanceLutTextureSampler);
+
+	return AtmosphereTransmittance;
+}
+
+#endif // USE_ATMOSPHERE_TRANSMITTANCE
+
+float3 GetAtmosphereAndCloudAttenuation(float3 StableTranslatedLargeWorldPosition, float2 ScreenUV)
+{
+	float3 Out = 1;
+
+	#if USE_ATMOSPHERE_TRANSMITTANCE
+	Out *= GetAtmosphericLightTransmittance(StableTranslatedLargeWorldPosition, ScreenUV, DeferredLightUniforms.Direction.xyz);
+	#endif
+
+	#if USE_CLOUD_TRANSMITTANCE
+	float OutOpticalDepth = 0.0f;
+	Out *= lerp(1.0f, GetCloudVolumetricShadow(StableTranslatedLargeWorldPosition, CloudShadowmapTranslatedWorldToLightClipMatrix, CloudShadowmapFarDepthKm, CloudShadowmapTexture, CloudShadowmapSampler, OutOpticalDepth), CloudShadowmapStrength);
+	#endif
+
+	return Out;
+}
+
+float3 GetStableTranslatedLargeWorldPosition(float2 SVPos, float DeviceZ)
+{
+	float3 StableTranslatedLargeWorldPosition = 0;
+	#if USE_ATMOSPHERE_TRANSMITTANCE || USE_CLOUD_TRANSMITTANCE
+	StableTranslatedLargeWorldPosition = SvPositionToTranslatedWorld(float4(SVPos, DeviceZ, 1.0));
+	#endif
+	return StableTranslatedLargeWorldPosition;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#if SUBSTRATE_ENABLED
+
+float4 SubstrateReadPrecomputedShadowFactors(FSubstratePixelHeader SubstratePixelHeader, int2 PixelPos)
+{
+	if (SubstratePixelHeader.HasPrecShadowMask())
+	{
+#if ALLOW_STATIC_LIGHTING
+		float4 GBufferE = SceneTexturesStruct.GBufferETexture.Load(int3(PixelPos, 0));
+#else
+		float4 GBufferE = 1;
+#endif
+		return GBufferE;
+	}
+	return SubstratePixelHeader.HasZeroPrecShadowMask() ? 0.0f : 1.0f;
+}
+
+#endif // SUBSTRATE_ENABLED
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Affect the light color by any other shadow/transmittance before the lighting is evaluated
+// in order to get a correct alpha channel containing important information for SSS.
+void UpdateLightDataColor(inout float3 LightDataColor, FInputParams InputParams, FDerivedParams DerivedParams)
+{
+	const float Attenuation = ComputeLightProfileMultiplier(DerivedParams.TranslatedWorldPosition, GetDeferredLightTranslatedWorldPosition(), -DeferredLightUniforms.Direction, DeferredLightUniforms.Tangent, DeferredLightUniforms.IESAtlasIndex);
+	const float3 AttenuationRGB = Attenuation * GetAtmosphereAndCloudAttenuation(GetStableTranslatedLargeWorldPosition(InputParams.PixelPos, LookupDeviceZ(InputParams.ScreenUV)), InputParams.ScreenUV);
+
+	LightDataColor *= AttenuationRGB;
+}
+
+#if USE_HAIR_LIGHTING == 0
+
+void DeferredLightPixelMain(
+#if LIGHT_SOURCE_SHAPE > 0
+	float4 InScreenPosition : TEXCOORD0,
+#else
+	float2 ScreenUV			: TEXCOORD0,
+	float3 ScreenVector		: TEXCOORD1,
+#endif
+	float4 SVPos			: SV_POSITION,
+	out float4 OutColor		: SV_Target0
+	//////////////////custom//////////////
+#if LIGHTING_SHADOW_BUFFER_OUTPUT
+	// [LightingShadowBuffer] Feature-on layout reserves Target1/2 for the
+	// accumulation buffers. Toon/Substrate outputs follow without collisions.
+	, out float4 LightingContribution : SV_Target1
+	, out float ShadowContribution : SV_Target2
+#if IS_TOON_MAINLIGHT
+	, out float4 ToonShadow	: SV_Target3
+#if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
+	, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target4
+	, out float3 OutSubSurfaceSceneColor : SV_Target5
+#endif
+#else
+#if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
+, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target3
+, out float3 OutSubSurfaceSceneColor : SV_Target4
+#endif
+#endif
+#else
+	// [LightingShadowBuffer] Keep the feature-off MRT layout compatible with
+	// the existing Toon/Substrate pass bindings.
+#if IS_TOON_MAINLIGHT
+	// Toon Shadow
+	, out float4 ToonShadow	: SV_Target1
+#if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
+	, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target2
+	, out float3 OutSubSurfaceSceneColor : SV_Target3
+#endif
+#else
+#if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
+, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target1
+, out float3 OutSubSurfaceSceneColor : SV_Target2
+#endif
+#endif
+#endif
+/////////////////////end//////////////////////
+	)
+{
+	const float2 PixelPos = SVPos.xy;
+	OutColor = 0;
+#if LIGHTING_SHADOW_BUFFER_OUTPUT
+	// [LightingShadowBuffer] Each light contributes to a once-per-view cleared
+	// accumulation target, so this pass starts its pixel contribution at zero.
+	LightingContribution = 0;
+	ShadowContribution = 0;
+#endif
+#if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
+	OutOpaqueRoughRefractionSceneColor = 0;
+	OutSubSurfaceSceneColor = 0;
+#endif
+
+	// Convert input data (directional/local light)
+	FInputParams InputParams = (FInputParams)0;
+	InputParams.PixelPos		= SVPos.xy;
+#if LIGHT_SOURCE_SHAPE > 0
+	InputParams.ScreenPosition	= InScreenPosition;
+	InputParams.ScreenUV		= InScreenPosition.xy / InScreenPosition.w * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz;
+	InputParams.ScreenVector	= 0;
+#else
+	InputParams.ScreenPosition	= 0;
+	InputParams.ScreenUV		= ScreenUV;
+	InputParams.ScreenVector	= ScreenVector;
+#endif
+
+#if USE_LIGHTING_CHANNELS
+	// [ShadowChannelPrototype] Keep direct-light and shadow-receiver decisions independent.
+	const bool bLightingChannelMatch = (GetLightingChannelMask(InputParams.ScreenUV) & DeferredLightUniforms.LightingChannelMask) != 0;
+#else
+	const bool bLightingChannelMatch = true;
+	#endif
+	const bool bShadowReceiverChannelMatch = IsShadowReceiverChannelMatch(uint2(InputParams.PixelPos));
+	// [ShadowChannelPrototype] Preview-only subtraction path: a shadow-only light darkens
+	// where its native attenuation is missing, so the result is visible before box mapping.
+	const bool bShadowChannelOnly = !bLightingChannelMatch && bShadowReceiverChannelMatch;
+
+#if SUBTRATE_GBUFFER_FORMAT==1
+
+	FSubstrateAddressing SubstrateAddressing = GetSubstratePixelDataByteOffset(PixelPos, uint2(View.BufferSizeAndInvSize.xy), Substrate.MaxBytesPerPixel);
+	FSubstratePixelHeader SubstratePixelHeader = UnpackSubstrateHeaderIn(Substrate.MaterialTextureArray, SubstrateAddressing, Substrate.TopLayerTexture);
+
+	float EstimatedCost = 0.3; // running the PixelShader at all has a cost
+
+	BRANCH
+	if (SubstratePixelHeader.ClosureCount > 0	// This test is also enough to exclude sky pixels
+		&& (bLightingChannelMatch || bShadowReceiverChannelMatch))
+	{
+		const float SceneDepth = CalcSceneDepth(InputParams.ScreenUV);
+		const FDerivedParams DerivedParams = GetDerivedParams(InputParams, SceneDepth);
+
+		FDeferredLightData LightData = InitDeferredLightFromUniforms(CURRENT_LIGHT_TYPE);
+		UpdateLightDataColor(LightData.Color, InputParams, DerivedParams);
+		// [ShadowChannelPrototype] A shadow-channel-only light is composited below as a
+		// shadow-only preview. Keep it out of the regular BRDF lighting path so the
+		// point-light radius, N.L, and material response cannot attenuate the preview.
+		if (!bLightingChannelMatch)
+		{
+			LightData.Color = 0.0f;
+		}
+
+		float3 V =-DerivedParams.CameraVector;
+		float3 L = LightData.Direction;	// Already normalized
+		float3 ToLight = L;
+		float LightMask = 1;
+		float ShadowChannelCurveFactor = 1.0f;
+		if (LightData.bRadialLight)
+		{
+			LightMask = GetLocalLightAttenuation(DerivedParams.TranslatedWorldPosition, LightData, ToLight, L);
+			ShadowChannelCurveFactor = GetShadowChannelCurveFactor(length(ToLight) * LightData.InvRadius);
+		}
+
+		if (LightMask > 0)
+		{
+			FSubstrateShadowTermInputParameters SubstrateShadowTermInputParameters	= GetInitialisedSubstrateShadowTermInputParameters();
+			SubstrateShadowTermInputParameters.bEvaluateShadowTerm					= true;
+			SubstrateShadowTermInputParameters.SceneDepth							= SceneDepth;
+			SubstrateShadowTermInputParameters.PrecomputedShadowFactors				= SubstrateReadPrecomputedShadowFactors(SubstratePixelHeader, PixelPos, SceneTexturesStruct.GBufferETexture);
+			SubstrateShadowTermInputParameters.TranslatedWorldPosition				= DerivedParams.TranslatedWorldPosition;
+			SubstrateShadowTermInputParameters.LightAttenuation						= GetLightAttenuationFromShadow(InputParams, SceneDepth, DerivedParams.TranslatedWorldPosition);
+			// [LightingShadowBuffer] Preserve the native visibility before the
+			// Shadow Channel preview transforms the attenuation for SceneColor.
+			float4 NativeShadowAttenuation = SubstrateShadowTermInputParameters.LightAttenuation;
+			// [ShadowChannelPrototype] Convert native visibility into a negative shadow amount for preview.
+			if (bShadowChannelOnly)
+			{
+				SubstrateShadowTermInputParameters.LightAttenuation = 1.0f - saturate(SubstrateShadowTermInputParameters.LightAttenuation);
+			}
+			// [ShadowChannelPrototype] A non-matching receiver ignores this light's native shadow factor.
+			if (!bShadowReceiverChannelMatch)
+			{
+				SubstrateShadowTermInputParameters.LightAttenuation = 1.0f;
+			}
+#if USE_ADAPTIVE_VOLUMETRIC_SHADOW_MAP
+			//SubstrateShadowTermInputParameters.LightAttenuation *= Luminance(ComputeTransmittance(DerivedParams.TranslatedWorldPosition, LightData.TranslatedWorldPosition, 256));
+			const float AVSMTransmittance = AVSM_SampleTransmittance(DerivedParams.TranslatedWorldPosition, LightData.TranslatedWorldPosition);
+			SubstrateShadowTermInputParameters.LightAttenuation *= AVSMTransmittance;
+			NativeShadowAttenuation *= AVSMTransmittance;
+#endif // USE_ADAPTIVE_VOLUMETRIC_SHADOW_MAP
+			SubstrateShadowTermInputParameters.Dither								= InterleavedGradientNoise(InputParams.PixelPos, View.StateFrameIndexMod8);
+
+	#if LIGHTING_SHADOW_BUFFER_OUTPUT
+			// [LightingShadowBuffer] Evaluate the same Substrate response with all
+			// native visibility and contact inputs neutralized; LightMask and material
+			// response remain.
+			FSubstrateShadowTermInputParameters LightingBufferShadowTermInputParameters = SubstrateShadowTermInputParameters;
+			LightingBufferShadowTermInputParameters.PrecomputedShadowFactors = 1.0f;
+			LightingBufferShadowTermInputParameters.LightAttenuation = 1.0f;
+			FDeferredLightData LightingBufferLightData = LightData;
+			LightingBufferLightData.ContactShadowLength = 0.0f;
+			LightingBufferLightData.ContactShadowCastingIntensity = 0.0f;
+			LightingBufferLightData.ContactShadowNonCastingIntensity = 0.0f;
+			FSubstrateDeferredLighting LightingBufferSubstrateLighting = SubstrateDeferredLighting(
+				LightingBufferLightData,
+				V,
+				L,
+				ToLight,
+				LightMask,
+				LightingBufferShadowTermInputParameters,
+				Substrate.MaterialTextureArray,
+				SubstrateAddressing,
+				SubstratePixelHeader);
+			if (bLightingChannelMatch)
+			{
+				// [LightingShadowBuffer] Reserve LightingBuffer alpha for the
+				// Shadow Channel mask; direct lighting only occupies RGB.
+				LightingContribution += float4(LightingBufferSubstrateLighting.SceneColor.rgb, 0.0f);
+			}
+
+			// [LightingShadowBuffer] Keep native UE occlusion and Shadow Channel
+			// subtraction in separate channels. Both are later constrained by the
+			// same authored box, but they must not be pre-mixed or the box edge can
+			// expose a rectangular seam when the two masks overlap.
+			const float ShadowReceiverFilter = bShadowChannelOnly ? (bShadowReceiverChannelMatch ? 1.0f : 0.0f) : 1.0f;
+			const float ShadowWeight = bShadowChannelOnly
+				? DeferredLightUniforms.ShadowChannelSubtractionStrength * ShadowChannelCurveFactor
+				: 1.0f;
+			FShadowTerms NativeShadowTermsForBuffer;
+			NativeShadowTermsForBuffer.SurfaceShadow = 1.0f;
+			NativeShadowTermsForBuffer.TransmissionShadow = 1.0f;
+			NativeShadowTermsForBuffer.TransmissionThickness = 1.0f;
+			NativeShadowTermsForBuffer.HairTransmittance.OpaqueVisibility = 1.0f;
+			// [LightingShadowBuffer] Export only the stable light/shadow-map term.
+			// Screen-space contact shadows use frame-indexed ray dithering and are
+			// intentionally left to the native SceneColor path; including them here
+			// makes the standalone ShadowBuffer shimmer at its silhouette.
+			FDeferredLightData ShadowBufferLightData = LightData;
+			ShadowBufferLightData.ContactShadowLength = 0.0f;
+			ShadowBufferLightData.ContactShadowCastingIntensity = 0.0f;
+			ShadowBufferLightData.ContactShadowNonCastingIntensity = 0.0f;
+			GetShadowTerms(
+				SceneDepth,
+				SubstrateShadowTermInputParameters.PrecomputedShadowFactors,
+				0,
+				1.0f,
+				ShadowBufferLightData,
+				DerivedParams.TranslatedWorldPosition,
+				// [LightingShadowBuffer] Substrate's radial path updates L in
+				// GetLocalLightAttenuation; use that same local direction for contacts.
+				L,
+				NativeShadowAttenuation,
+				// [LightingShadowBuffer] Do not carry the frame-indexed contact-shadow
+				// dither into the persistent debug/mapping input. Native SceneColor can
+				// retain temporal dither, but this separately accumulated mask must be
+				// deterministic or its edges shimmer whenever StateFrameIndex changes.
+				0.5f,
+				NativeShadowTermsForBuffer);
+			const float NativeShadowVisibilityForBuffer = saturate(NativeShadowTermsForBuffer.SurfaceShadow);
+			const float NativeShadowBufferAmount = bShadowChannelOnly
+				? 0.0f
+				: (1.0f - NativeShadowVisibilityForBuffer) * saturate(LightMask);
+			const float ShadowChannelBufferAmount = bShadowChannelOnly
+				? saturate(SubstrateShadowTermInputParameters.LightAttenuation.x) * saturate(LightMask) * ShadowReceiverFilter * ShadowWeight
+				: 0.0f;
+			ShadowContribution += NativeShadowBufferAmount;
+			// [LightingShadowBuffer] Alpha carries only the subtractive channel;
+			// ordinary light accumulation above always writes alpha zero.
+			LightingContribution.a += ShadowChannelBufferAmount;
+#endif
+
+			FSubstrateDeferredLighting SubstrateLighting = SubstrateDeferredLighting(
+				LightData,
+				V,
+				L,
+				ToLight,
+				LightMask,
+				SubstrateShadowTermInputParameters,
+				Substrate.MaterialTextureArray,
+				SubstrateAddressing,
+				SubstratePixelHeader);
+
+			EstimatedCost += SubstrateLighting.EstimatedCost;
+
+			OutColor += SubstrateLighting.SceneColor;
+		// [ShadowChannelPrototype] Apply the direct fallback subtraction only when
+		// the separated buffer path is unavailable; with buffers enabled the volume
+		// pass owns this color operation so it can preserve the tint source.
+			#if LIGHTING_SHADOW_BUFFER_OUTPUT
+			// [LightingShadowBuffer] When the separated buffers are active, keep
+			// SceneColor intact. Deferred Toon Volume will apply ShadowTint from
+			// ShadowBuffer; subtracting here would blacken the source before the
+			// color mapping pass and make any blue tint invisible.
+			if (bShadowChannelOnly && bWriteLightingShadowBuffers == 0)
+			#else
+			if (bShadowChannelOnly)
+			#endif
+			{
+				// [ShadowChannelPrototype] Limit the subtraction to the native local-light
+				// influence volume. Outside a point/spot/rect light's radius, the shadow
+				// lookup can return an occluded/default value even though the light cannot
+				// affect the pixel.
+				OutColor.rgb -= SubstrateShadowTermInputParameters.LightAttenuation.xxx * saturate(LightMask) * ShadowChannelCurveFactor * DeferredLightUniforms.ShadowChannelSubtractionStrength;
+			}
+		#if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
+			OutOpaqueRoughRefractionSceneColor += SubstrateLighting.OpaqueRoughRefractionSceneColor;
+			OutSubSurfaceSceneColor += SubstrateLighting.SubSurfaceSceneColor;
+		#endif
+		}
+	}
+
+#if VISUALIZE_LIGHT_CULLING == 1
+	OutColor = ConvertEstimatedCostToColor(EstimatedCost);
+	#if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
+	OutOpaqueRoughRefractionSceneColor = 0.0f;
+	OutSubSurfaceSceneColor = 0.0f;
+	#endif
+#endif
+
+#else // SUBTRATE_GBUFFER_FORMAT==1
+
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(InputParams.ScreenUV);
+	// Only light pixels marked as using deferred shading
+	BRANCH if (ScreenSpaceData.GBuffer.ShadingModelID > 0
+		&& (bLightingChannelMatch || bShadowReceiverChannelMatch))
+	{
+		const float SceneDepth = CalcSceneDepth(InputParams.ScreenUV);
+		const FDerivedParams DerivedParams = GetDerivedParams(InputParams, SceneDepth);
+
+		FDeferredLightData LightData = InitDeferredLightFromUniforms(CURRENT_LIGHT_TYPE);
+		UpdateLightDataColor(LightData.Color, InputParams, DerivedParams);
+		// [ShadowChannelPrototype] A shadow-channel-only light is composited below as a
+		// shadow-only preview. Keep it out of the regular BRDF lighting path so the
+		// point-light radius, N.L, and material response cannot attenuate the preview.
+		if (!bLightingChannelMatch)
+		{
+			LightData.Color = 0.0f;
+		}
+		/////////////////////custom////////////////////////
+		// Toon Multiple light sources
+		LightData.ToonLight.IsToon = ScreenSpaceData.GBuffer.ShadingModelID == SHADINGMODELID_TOON;
+		LightData.ToonLight.IsDirectionalLight = !LightData.bRadialLight;
+		float3 Pivot = GetToonPivot(ScreenSpaceData.GBuffer.ToonBuffer.ObjectID);
+		if (LightData.ToonLight.IsDirectionalLight)
+		{
+			MakeDirectionalLightDistance(LightData.Direction, DerivedParams.TranslatedWorldPosition, Pivot, LightData.ToonLight.FlattenRange, LightData.ToonLight.DirectionalLightDistance);
+		}
+		else
+		{
+			MakeFlattenRange(LightData.TranslatedWorldPosition, Pivot, LightData.ToonLight.FlattenRange);
+		}
+		//////////////////////end///////////////////////
+
+	 #if USE_HAIR_COMPLEX_TRANSMITTANCE
+		if (ScreenSpaceData.GBuffer.ShadingModelID == SHADINGMODELID_HAIR && ShouldUseHairComplexTransmittance(ScreenSpaceData.GBuffer))
+		{
+			LightData.HairTransmittance = EvaluateDualScattering(ScreenSpaceData.GBuffer, DerivedParams.CameraVector, -DeferredLightUniforms.Direction);
+		}
+	#endif
+
+		float Dither = InterleavedGradientNoise(InputParams.PixelPos, View.StateFrameIndexMod8);
+
+		float SurfaceShadow = 1.0f;
+		
+		float4 LightAttenuation = GetLightAttenuationFromShadow(InputParams, SceneDepth, DerivedParams.TranslatedWorldPosition);
+		float4 LightAttenuationForComposite = LightAttenuation;
+		// [ShadowChannelPrototype] Recompute the native light-volume mask so the
+		// shadow-only subtraction is zero outside local-light influence.
+		float3 ShadowToLight = LightData.Direction;
+		float3 ShadowLightDirection = LightData.Direction;
+		float ShadowLightMask = 1.0f;
+		float ShadowChannelCurveFactor = 1.0f;
+		if (LightData.bRadialLight)
+		{
+			ShadowLightMask = GetLocalLightAttenuation(
+				DerivedParams.TranslatedWorldPosition,
+				LightData,
+				ShadowToLight,
+				ShadowLightDirection);
+			ShadowChannelCurveFactor = GetShadowChannelCurveFactor(length(ShadowToLight) * LightData.InvRadius);
+		}
+
+
+#if USE_ADAPTIVE_VOLUMETRIC_SHADOW_MAP
+		float3 WorldPosition = DFFastSubtractDemote(DerivedParams.TranslatedWorldPosition, PrimaryView.PreViewTranslation);
+		float3 WorldToLight = LightData.Direction * 10000;
+		if (LightData.bSpotLight || LightData.bRectLight)
+		{
+			float3 WorldLightPosition = DFFastSubtractDemote(LightData.TranslatedWorldPosition, PrimaryView.PreViewTranslation);
+			WorldToLight = WorldLightPosition - WorldPosition;
+		}
+
+		if (!AVSM.bIsEmpty)
+		{
+			LightAttenuation *= AVSM_SampleTransmittance(DerivedParams.TranslatedWorldPosition, LightData.TranslatedWorldPosition);
+		}
+		else
+		{
+			//LightAttenuation *= Luminance(ComputeTransmittance(WorldPosition, WorldToLight, 512));
+		}
+#endif // USE_ADAPTIVE_VOLUMETRIC_SHADOW_MAP
+		// [LightingShadowBuffer] Keep the original attenuation for the native
+		// ShadowTerms evaluation; radial lights use .z while directional lights use
+		// .x/.y, matching GetShadowTermsBase's channel remapping.
+		const float4 NativeShadowAttenuationForBuffer = LightAttenuation;
+		// [ShadowChannelPrototype] Convert native shadow visibility to a subtractive amount for preview.
+		if (bShadowChannelOnly)
+		{
+			LightAttenuationForComposite = 1.0f - saturate(LightAttenuation);
+		}
+		// [ShadowChannelPrototype] A non-matching receiver ignores this light's native shadow factor.
+		else if (!bShadowReceiverChannelMatch)
+		{
+			LightAttenuationForComposite = 1.0f;
+		}
+	#if LIGHTING_SHADOW_BUFFER_OUTPUT
+		// [LightingShadowBuffer] Evaluate direct lighting with all native visibility
+		// and contact inputs neutralized while retaining local/material response.
+		FGBufferData LightingBufferGBuffer = ScreenSpaceData.GBuffer;
+		LightingBufferGBuffer.PrecomputedShadowFactors = 1.0f;
+		FDeferredLightData LightingBufferLightData = LightData;
+		LightingBufferLightData.ContactShadowLength = 0.0f;
+		LightingBufferLightData.ContactShadowCastingIntensity = 0.0f;
+		LightingBufferLightData.ContactShadowNonCastingIntensity = 0.0f;
+		float UnshadowedSurfaceShadow = 1.0f;
+		const float4 UnshadowedRadiance = GetDynamicLighting(
+			DerivedParams.TranslatedWorldPosition,
+			DerivedParams.CameraVector,
+			LightingBufferGBuffer,
+			ScreenSpaceData.AmbientOcclusion,
+			LightingBufferLightData,
+			float4(1.0f, 1.0f, 1.0f, 1.0f),
+			Dither,
+			uint2(InputParams.PixelPos),
+			UnshadowedSurfaceShadow);
+		if (bLightingChannelMatch)
+		{
+			// [LightingShadowBuffer] Reserve alpha for the Shadow Channel mask.
+			LightingContribution += float4(UnshadowedRadiance.rgb, 0.0f);
+		}
+
+		// [LightingShadowBuffer] Keep native UE occlusion in ShadowBuffer and the
+		// Shadow Channel subtraction in LightingBuffer alpha. The volume pass applies
+		// the same box weight to both masks and combines them without double tinting.
+		const float ShadowReceiverFilter = bShadowChannelOnly ? (bShadowReceiverChannelMatch ? 1.0f : 0.0f) : 1.0f;
+		const float ShadowWeight = bShadowChannelOnly
+			? DeferredLightUniforms.ShadowChannelSubtractionStrength * ShadowChannelCurveFactor
+			: 1.0f;
+		FShadowTerms NativeShadowTermsForBuffer;
+		NativeShadowTermsForBuffer.SurfaceShadow = 1.0f;
+		NativeShadowTermsForBuffer.TransmissionShadow = 1.0f;
+		NativeShadowTermsForBuffer.TransmissionThickness = 1.0f;
+		NativeShadowTermsForBuffer.HairTransmittance.OpaqueVisibility = 1.0f;
+		// [LightingShadowBuffer] Keep the exported mask independent of the
+		// frame-dithered screen-space contact-shadow ray.
+		FDeferredLightData ShadowBufferLightData = LightData;
+		ShadowBufferLightData.ContactShadowLength = 0.0f;
+		ShadowBufferLightData.ContactShadowCastingIntensity = 0.0f;
+		ShadowBufferLightData.ContactShadowNonCastingIntensity = 0.0f;
+		GetShadowTerms(
+			ScreenSpaceData.GBuffer.Depth,
+			ScreenSpaceData.GBuffer.PrecomputedShadowFactors,
+			ScreenSpaceData.GBuffer.ShadingModelID,
+			ScreenSpaceData.GBuffer.CustomData.a,
+			ShadowBufferLightData,
+			DerivedParams.TranslatedWorldPosition,
+			// [LightingShadowBuffer] Radial lights use the per-pixel local L;
+			// directional lights leave ShadowLightDirection at Direction.
+			ShadowLightDirection,
+			NativeShadowAttenuationForBuffer,
+			// [LightingShadowBuffer] Keep the exported shadow mask temporally stable;
+			// the native SceneColor path below still uses its normal frame dither.
+			0.5f,
+			NativeShadowTermsForBuffer);
+		const float NativeShadowVisibilityForBuffer = saturate(NativeShadowTermsForBuffer.SurfaceShadow);
+		const float NativeShadowBufferAmount = bShadowChannelOnly
+			? 0.0f
+			: (1.0f - NativeShadowVisibilityForBuffer) * saturate(ShadowLightMask);
+		const float ShadowChannelBufferAmount = bShadowChannelOnly
+			? saturate(LightAttenuationForComposite.x) * saturate(ShadowLightMask) * ShadowReceiverFilter * ShadowWeight
+			: 0.0f;
+		ShadowContribution += NativeShadowBufferAmount;
+		LightingContribution.a += ShadowChannelBufferAmount;
+	#endif
+		float4 Radiance = GetDynamicLighting(DerivedParams.TranslatedWorldPosition, DerivedParams.CameraVector, ScreenSpaceData.GBuffer, ScreenSpaceData.AmbientOcclusion, LightData, LightAttenuationForComposite, Dither, uint2(InputParams.PixelPos), SurfaceShadow);
+		OutColor += Radiance;
+		// [ShadowChannelPrototype] Apply a direct subtractive fallback from native
+		// shadow visibility when the separated buffer path is unavailable.
+		#if LIGHTING_SHADOW_BUFFER_OUTPUT
+		// [LightingShadowBuffer] Let the pre-tonemap volume own the visible
+		// subtractive color while its MRTs are enabled; otherwise the direct
+		// subtraction would erase the color source before ShadowTint is applied.
+		if (bShadowChannelOnly && bWriteLightingShadowBuffers == 0)
+		#else
+		if (bShadowChannelOnly)
+		#endif
+		{
+			OutColor.rgb -= LightAttenuationForComposite.xxx * saturate(ShadowLightMask) * ShadowChannelCurveFactor * DeferredLightUniforms.ShadowChannelSubtractionStrength;
+		}
+
+		/////////////////////custom//////////////////////////
+#if IS_TOON_MAINLIGHT
+		// Remove Toon Shading
+		// 在这里屏蔽掉Toon材质MainLight的光照；Shadow Channel-only 的负光照预览需要保留。
+		// [ShadowChannelPrototype] Do not erase the subtractive preview for Toon materials.
+		if(ScreenSpaceData.GBuffer.ShadingModelID == SHADINGMODELID_TOON && !bShadowChannelOnly)
+		{
+			// ToonActorTexture测试代码
+			// int3 ToonIDUV = 0;
+			// ToonIDUV.x = ScreenSpaceData.GBuffer.ToonBuffer.ObjectID % 16;
+			// ToonIDUV.y = ScreenSpaceData.GBuffer.ToonBuffer.ObjectID / 16;
+			// float3 Pivot = SceneTexturesStruct.ToonActorTexture.Load(ToonIDUV).xyz;
+			// float ToonDistance = length(Pivot - DerivedParams.TranslatedWorldPosition) / 200.0f;
+			// Radiance = float4(ToonDistance.xxx, 1.0f);
+			OutColor = 0.0f;
+		}
+		// Toon Shadow
+		float HairShadow = 1;
+
+		FShadowTerms Shadow;
+		Shadow.SurfaceShadow = ScreenSpaceData.AmbientOcclusion;
+		Shadow.TransmissionShadow = 1;
+		Shadow.TransmissionThickness = 1;
+		Shadow.HairTransmittance.OpaqueVisibility = 1;
+		const float ContactShadowOpacity = ScreenSpaceData.GBuffer.CustomData.a;
+
+		
+		// 计算Shadow
+		GetShadowTerms(ScreenSpaceData.GBuffer.Depth, ScreenSpaceData.GBuffer.PrecomputedShadowFactors, ScreenSpaceData.GBuffer.ShadingModelID,
+			ContactShadowOpacity, LightData, DerivedParams.TranslatedWorldPosition, LightData.Direction, LightAttenuation, Dither, Shadow);
+		float NoL = dot(ScreenSpaceData.GBuffer.WorldNormal, LightData.Direction);
+		// RayTracing Shadow在物体背面不会发射射线计算阴影
+		// 因此SurfaceShadow在物体背面会有问题，使用NoL把背面的阴影给补上
+		if (!(ScreenSpaceData.GBuffer.ToonBuffer.ShadowCastFlag & SCF_DISABLEONSELF))
+		{
+			Shadow.SurfaceShadow *= step(0, NoL);
+		}
+		
+		if(ScreenSpaceData.GBuffer.ShadingModelID == SHADINGMODELID_TOON &&
+			(ScreenSpaceData.GBuffer.ToonBuffer.ToonModel == TOONMODEL_FACE || ScreenSpaceData.GBuffer.ToonBuffer.ToonModel == TOONMODEL_EYE))
+		{
+			HairShadow = GetHairShadow(ScreenSpaceData.GBuffer,  LightData, InputParams.ScreenUV);
+		}
+		ToonShadow = EncodeToonShadow(Shadow.SurfaceShadow, Shadow.TransmissionShadow, HairShadow);
+#endif
+		////////////////end//////////////////////////////
+	}
+
+#endif // SUBTRATE_GBUFFER_FORMAT==1
+
+	// RGB:SceneColor Specular and Diffuse
+	// A:Non Specular SceneColor Luminance
+	// So we need PreExposure for both color and alpha
+	OutColor.rgba *= GetExposure();
+#if LIGHTING_SHADOW_BUFFER_OUTPUT
+	// [LightingShadowBuffer] LightingBuffer RGB shares SceneColor's pre-exposed
+	// HDR space. Alpha is a dimensionless Shadow Channel mask and must not be
+	// scaled by exposure; ShadowBuffer remains a scalar occlusion contribution.
+	LightingContribution.rgb *= GetExposure();
+	if (bWriteLightingShadowBuffers == 0)
+	{
+		LightingContribution = 0;
+		ShadowContribution = 0;
+	}
+#endif
+#if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED 
+	// Idem
+	OutOpaqueRoughRefractionSceneColor *= GetExposure();
+	OutSubSurfaceSceneColor *= GetExposure();
+#endif
+}
+#endif
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#if USE_HAIR_LIGHTING == 1
+
+// Compute transmittance data from a transmittance mask
+FHairTransmittanceData GetTransmittanceDataFromTransmitttanceMask(
+	FDeferredLightData LightData, 
+	FGBufferData GBufferData, 
+	FHairTransmittanceMask TransmittanceMask,
+	float3 TranslatedWorldPosition, 
+	float3 CameraVector)
+{
+	float3 L = float3(0, 0, 1);
+	if (LightData.bRadialLight)
+	{
+		L = normalize(LightData.TranslatedWorldPosition - TranslatedWorldPosition);
+	}
+	else
+	{
+		L = LightData.Direction;
+	}
+
+	const float3 V = normalize(-CameraVector);
+	return GetHairTransmittance(
+		V,
+		L,
+		GBufferData,
+		TransmittanceMask,
+		View.HairScatteringLUTTexture,
+		HairScatteringLUTSampler,
+		View.HairComponents);
+}
+
+Texture2D<float4> ScreenShadowMaskSubPixelTexture;
+
+uint HairTransmittanceBufferMaxCount;
+Buffer<uint> HairTransmittanceBuffer;
+uint HairShadowMaskValid;
+float4 ShadowChannelMask;
+
+void DeferredLightPixelMain(
+	float4 SVPos : SV_POSITION,
+	nointerpolation uint NodeCount  : DISPATCH_NODECOUNT,
+	nointerpolation uint2 Resolution : DISPATCH_RESOLUTION,
+	out float4 OutColor : SV_Target0
+#if LIGHTING_SHADOW_BUFFER_OUTPUT
+	// [LightingShadowBuffer] Hair keeps the reserved buffer slots; Target0 is
+	// its sample-lighting target while Target1/2 remain deterministic buffers.
+	, out float4 LightingContribution : SV_Target1
+	, out float ShadowContribution : SV_Target2
+#endif
+	)
+{
+	OutColor = 0;
+#if LIGHTING_SHADOW_BUFFER_OUTPUT
+	// [LightingShadowBuffer] Initialize optional hair contributions before any
+	// sample-count or lighting-channel early return.
+	LightingContribution = 0;
+	ShadowContribution = 0;
+#endif
+
+	const uint2 InCoord = uint2(SVPos.xy);
+	const uint SampleIndex = InCoord.x + InCoord.y * Resolution.x;
+	if (SampleIndex >= NodeCount)
+	{
+		return;
+	}
+
+	const uint2 PixelCoord = HairStrands.HairSampleCoords[SampleIndex];
+	const float2 UV = (PixelCoord + float2(0.5f, 0.5f)) / float2(View.BufferSizeAndInvSize.xy);
+	const float2 ScreenPosition = (UV - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy;
+	
+	const FPackedHairSample PackedSample = HairStrands.HairSampleData[SampleIndex];
+	const FHairSample Sample = UnpackHairSample(PackedSample);
+
+	// [ShadowChannelPrototype] Hair keeps evaluating a Lighting-Channel mismatch
+	// when its Shadow Channel receiver matches, so ShadowBuffer can receive a
+	// shadow-only contribution instead of being dropped by an early return.
+	#if USE_LIGHTING_CHANNELS
+	const bool bHairLightingChannelMatch = (Sample.LightChannelMask & DeferredLightUniforms.LightingChannelMask) != 0;
+	#else
+	const bool bHairLightingChannelMatch = true;
+	#endif
+	const bool bHairShadowReceiverChannelMatch = IsShadowReceiverChannelMatch(PixelCoord);
+	const bool bHairShadowChannelOnly = !bHairLightingChannelMatch && bHairShadowReceiverChannelMatch;
+	if (!bHairLightingChannelMatch && !bHairShadowChannelOnly)
+	{
+		return;
+	}
+
+	// Inject material data from the visibility/mini-gbuffer for hair
+	const float SceneDepth = ConvertFromDeviceZ(Sample.Depth);
+	FScreenSpaceData HairScreenSpaceData = (FScreenSpaceData)0;
+	HairScreenSpaceData.AmbientOcclusion = 1;
+	HairScreenSpaceData.GBuffer = HairSampleToGBufferData(Sample, HairStrands.HairDualScatteringRoughnessOverride);
+
+	const float3 TranslatedWorldPosition = mul(float4(GetScreenPositionForProjectionType(ScreenPosition, HairScreenSpaceData.GBuffer.Depth), HairScreenSpaceData.GBuffer.Depth, 1), View.ScreenToTranslatedWorld).xyz;
+	const float3 CameraVector = GetCameraVectorFromTranslatedWorldPosition(TranslatedWorldPosition);
+
+	FDeferredLightData LightData = InitDeferredLightFromUniforms(CURRENT_LIGHT_TYPE);
+	// [ShadowChannelPrototype] A hair shadow-only light must not illuminate the
+	// receiver through the ordinary LightingBuffer/SceneColor path.
+	if (!bHairLightingChannelMatch)
+	{
+		LightData.Color = 0.0f;
+	}
+
+	// todo add light culling/early out
+
+	// Compute light attenuation from shadow mask, and fetch hair transmittance mask
+	// * Either use VSM shadow mask bits AND hair one pass transmittance buffer
+	// * Or use ShadowMask texture AND TransmittanceMask buffer
+	const float Dither = InterleavedGradientNoise(PixelCoord, View.StateFrameIndexMod8);
+	float4 LightAttenuation = 1.f;
+	FHairTransmittanceMask TransmittanceMask = InitHairTransmittanceMask();
+	#if USE_VIRTUAL_SHADOW_MAP_MASK
+	if (VirtualShadowMapId != INDEX_NONE)
+	{
+		// Fetch VSM shadow mask
+		uint GridLightListIndex = 0;
+		LightAttenuation = GetVirtualShadowMapMaskForLight(
+			ShadowMaskBits[PixelCoord],
+			PixelCoord,
+			SceneDepth,
+			VirtualShadowMapId,
+			TranslatedWorldPosition,
+			GridLightListIndex);
+
+		// Fetch transmittance mask
+		if (GridLightListIndex < GetPackedShadowMaskMaxLightCount())
+		{
+			// Use VSM GridLightListIndex, which contains data only for shadowed light. 
+			// The index computation needs to be identical as in HairStrandsDeepTransmittanceMask.usf
+			const uint TotalSampleCount = NodeCount;
+			const uint TransmittanceSampleIndex = SampleIndex + GridLightListIndex * TotalSampleCount;
+			const uint TransmittanceSampleMaxCount = TotalSampleCount * GetPackedShadowMaskMaxLightCount();
+			if (TransmittanceSampleIndex < TransmittanceSampleMaxCount)
+			{
+				TransmittanceMask = UnpackTransmittanceMask(HairTransmittanceBuffer[TransmittanceSampleIndex]);
+			}
+		}
+	}
+	#else
+	if (HairShadowMaskValid)
+	{
+		LightAttenuation = ScreenShadowMaskSubPixelTexture.Load(uint3(PixelCoord, 0));
+	}
+	if (SampleIndex < HairTransmittanceBufferMaxCount)
+	{
+		TransmittanceMask = UnpackTransmittanceMask(HairTransmittanceBuffer[SampleIndex]);
+	}
+	#endif
+
+	// Compute hair transmittance data
+	{
+		LightData.HairTransmittance = GetTransmittanceDataFromTransmitttanceMask(LightData, HairScreenSpaceData.GBuffer, TransmittanceMask, TranslatedWorldPosition, CameraVector);
+	}
+
+	if (any(ShadowChannelMask < 1.0f))
+	{
+		LightAttenuation = dot(LightAttenuation, ShadowChannelMask).xxxx;
+	}
+	LightAttenuation = min(LightAttenuation, LightData.HairTransmittance.OpaqueVisibility.xxxx);
+
+#if LIGHTING_SHADOW_BUFFER_OUTPUT
+	// [LightingShadowBuffer] Preserve native hair attenuation for ShadowTerms;
+	// radial lights use the .z channel through GetShadowTermsBase.
+	const float4 NativeHairShadowAttenuationForBuffer = LightAttenuation;
+	float3 HairToLight = LightData.Direction;
+	float3 HairLightDirection = LightData.Direction;
+	float HairLightMask = 1.0f;
+	float HairShadowChannelCurveFactor = 1.0f;
+	if (LightData.bRadialLight)
+	{
+		HairLightMask = GetLocalLightAttenuation(TranslatedWorldPosition, LightData, HairToLight, HairLightDirection);
+		HairShadowChannelCurveFactor = GetShadowChannelCurveFactor(length(HairToLight) * LightData.InvRadius);
+	}
+	FGBufferData LightingBufferHairGBuffer = HairScreenSpaceData.GBuffer;
+	LightingBufferHairGBuffer.PrecomputedShadowFactors = 1.0f;
+	FDeferredLightData LightingBufferHairLightData = LightData;
+	LightingBufferHairLightData.ContactShadowLength = 0.0f;
+	LightingBufferHairLightData.ContactShadowCastingIntensity = 0.0f;
+	LightingBufferHairLightData.ContactShadowNonCastingIntensity = 0.0f;
+	float UnshadowedHairSurfaceShadow = 1.0f;
+	const float4 UnshadowedHairRadiance = GetDynamicLighting(
+		TranslatedWorldPosition,
+		CameraVector,
+		LightingBufferHairGBuffer,
+		HairScreenSpaceData.AmbientOcclusion,
+		LightingBufferHairLightData,
+		float4(1.0f, 1.0f, 1.0f, 1.0f),
+		Dither,
+		PixelCoord,
+		UnshadowedHairSurfaceShadow);
+#endif
+
+	float SurfaceShadow = 1.0f;
+	const float4 Radiance = GetDynamicLighting(TranslatedWorldPosition, CameraVector, HairScreenSpaceData.GBuffer, HairScreenSpaceData.AmbientOcclusion, LightData, LightAttenuation, Dither, PixelCoord, SurfaceShadow);
+	const float  Attenuation = ComputeLightProfileMultiplier(TranslatedWorldPosition, GetDeferredLightTranslatedWorldPosition(), -DeferredLightUniforms.Direction, DeferredLightUniforms.Tangent, DeferredLightUniforms.IESAtlasIndex);
+	const float3 AtmosphericTransmittance = GetAtmosphereAndCloudAttenuation(GetStableTranslatedLargeWorldPosition(ScreenPosition, Sample.Depth), UV);
+
+	const float LocalCoverage = From8bitCoverage(Sample.Coverage8bit);
+
+	OutColor.rgb = AtmosphericTransmittance * Radiance.xyz * Attenuation * LocalCoverage * GetExposure();
+	OutColor.a = LocalCoverage;
+#if LIGHTING_SHADOW_BUFFER_OUTPUT
+	// [LightingShadowBuffer] Hair direct lighting keeps atmospheric/profile and
+	// coverage response; occlusion remains positive and range-limited.
+	const float HairLightingScale = Attenuation * LocalCoverage;
+	LightingContribution = float4(AtmosphericTransmittance * UnshadowedHairRadiance.xyz * HairLightingScale * GetExposure(), 0.0f);
+	// [LightingShadowBuffer] Match the standard shadow-only weighting while
+	// keeping ordinary hair shadow contributions at weight one.
+	const float HairShadowReceiverFilter = bHairShadowChannelOnly ? (bHairShadowReceiverChannelMatch ? 1.0f : 0.0f) : 1.0f;
+	const float HairShadowWeight = bHairShadowChannelOnly
+		? DeferredLightUniforms.ShadowChannelSubtractionStrength * HairShadowChannelCurveFactor
+		: 1.0f;
+	FShadowTerms NativeHairShadowTermsForBuffer;
+	NativeHairShadowTermsForBuffer.SurfaceShadow = 1.0f;
+	NativeHairShadowTermsForBuffer.TransmissionShadow = 1.0f;
+	NativeHairShadowTermsForBuffer.TransmissionThickness = 1.0f;
+	NativeHairShadowTermsForBuffer.HairTransmittance.OpaqueVisibility = 1.0f;
+	// [LightingShadowBuffer] Hair uses the same stable shadow-map-only export;
+	// native hair SceneColor still evaluates its own contact behavior.
+	FDeferredLightData HairShadowBufferLightData = LightData;
+	HairShadowBufferLightData.ContactShadowLength = 0.0f;
+	HairShadowBufferLightData.ContactShadowCastingIntensity = 0.0f;
+	HairShadowBufferLightData.ContactShadowNonCastingIntensity = 0.0f;
+	GetShadowTerms(
+		SceneDepth,
+		HairScreenSpaceData.GBuffer.PrecomputedShadowFactors,
+		HairScreenSpaceData.GBuffer.ShadingModelID,
+		HairScreenSpaceData.GBuffer.CustomData.a,
+		HairShadowBufferLightData,
+		TranslatedWorldPosition,
+		// [LightingShadowBuffer] Hair radial lights use the per-pixel local L;
+		// directional hair lights leave HairLightDirection at Direction.
+		HairLightDirection,
+		NativeHairShadowAttenuationForBuffer,
+		// [LightingShadowBuffer] Hair shadow output follows the same deterministic
+		// mask rule as the opaque buffer path.
+		0.5f,
+		NativeHairShadowTermsForBuffer);
+	const float NativeHairShadowVisibility = saturate(NativeHairShadowTermsForBuffer.SurfaceShadow);
+	// [LightingShadowBuffer] Hair follows the same separation as opaque lights:
+	// native occlusion is the scalar ShadowBuffer value, while the matching
+	// Shadow Channel is accumulated in LightingBuffer alpha. Both are box-mapped
+	// later, so their overlap is resolved in one place.
+	const float NativeHairShadowAmount = bHairShadowChannelOnly
+		? 0.0f
+		: (1.0f - NativeHairShadowVisibility) * saturate(HairLightMask) * LocalCoverage;
+	const float HairShadowChannelAmount = bHairShadowChannelOnly
+		? (1.0f - NativeHairShadowVisibility) * saturate(HairLightMask)
+			* LocalCoverage * HairShadowReceiverFilter * HairShadowWeight
+		: 0.0f;
+	ShadowContribution = NativeHairShadowAmount;
+	LightingContribution.a += HairShadowChannelAmount;
+	if (bWriteLightingShadowBuffers == 0)
+	{
+		LightingContribution = 0;
+		ShadowContribution = 0;
+	}
+#endif
+}
+#endif
