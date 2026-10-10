@@ -1,6 +1,7 @@
 #include "PostProcess/PostProcessDeferredToonVolumes.h"
 
 #include "DeferredToonVolumeSceneProxy.h"
+#include "Engine/DeferredToonInputRegistry.h"
 #include "DataDrivenShaderPlatformInfo.h"
 #include "GlobalRenderResources.h"
 #include "PixelShaderUtils.h"
@@ -12,6 +13,7 @@
 namespace
 {
 	static constexpr int32 CurveSampleCount = FDeferredToonVolumeSceneProxy::CurveSampleCount;
+	static constexpr int32 InputLayerCount = FDeferredToonInputStack::MaxInputLayers;
 
 	TAutoConsoleVariable<int32> CVarDeferredToonVolumes(
 		TEXT("r.Toon.DeferredVolumes"),
@@ -97,6 +99,13 @@ namespace
 			SHADER_PARAMETER(float, Priority)
 			SHADER_PARAMETER(uint32, bShadowColorVolumeValid)
 			SHADER_PARAMETER(uint32, DebugView)
+			// [DeferredToon] Keep semantic input binding fixed-size.  The registry
+			// may grow without changing this shader parameter layout.
+			SHADER_PARAMETER_SCALAR_ARRAY(uint32, InputIds, [InputLayerCount])
+			SHADER_PARAMETER_SCALAR_ARRAY(uint32, InputChannels, [InputLayerCount])
+			SHADER_PARAMETER_SCALAR_ARRAY(uint32, InputAvailability, [InputLayerCount])
+			SHADER_PARAMETER_ARRAY(FVector4f, InputDefaults, [InputLayerCount])
+			SHADER_PARAMETER(uint32, InputNumLayers)
 			SHADER_PARAMETER_SCALAR_ARRAY(float, FalloffSamples, [CurveSampleCount])
 			SHADER_PARAMETER_ARRAY(FVector4f, LightingColorSamples, [CurveSampleCount])
 			SHADER_PARAMETER_ARRAY(FVector4f, ShadowColorSamples, [CurveSampleCount])
@@ -105,6 +114,37 @@ namespace
 	};
 
 	IMPLEMENT_GLOBAL_SHADER(FDeferredToonVolumePS, "/Engine/Private/PostProcessDeferredToonVolumes.usf", "MainPS", SF_Pixel);
+
+	// [DeferredToon] This first-stage stack is intentionally data-driven but
+	// fixed in capacity.  It exercises the scene-input contract before profiles
+	// are introduced; profile layers will replace this list without changing the
+	// shader ABI.
+	static void FillDefaultInputBinding(FDeferredToonVolumePS::FParameters& Parameters)
+	{
+		static constexpr EDeferredToonInputId DefaultInputs[InputLayerCount] =
+		{
+			EDeferredToonInputId::DirectLight,
+			EDeferredToonInputId::NativeShadow,
+			EDeferredToonInputId::ShadowChannel,
+			EDeferredToonInputId::AmbientOcclusion,
+			EDeferredToonInputId::BaseColor,
+			EDeferredToonInputId::WorldNormal,
+			EDeferredToonInputId::Roughness,
+			EDeferredToonInputId::ShadingModel,
+		};
+
+		Parameters.InputNumLayers = InputLayerCount;
+		for (int32 Index = 0; Index < InputLayerCount; ++Index)
+		{
+			const EDeferredToonInputId InputId = DefaultInputs[Index];
+			const FDeferredToonInputLayer Layer = FDeferredToonInputRegistry::MakeFallbackLayer(InputId);
+			const FDeferredToonInputDescriptor* Descriptor = FDeferredToonInputRegistry::ResolveDescriptor(Layer.InputId);
+			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputIds, Index) = static_cast<uint32>(Layer.InputId);
+			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputChannels, Index) = static_cast<uint32>(Descriptor ? Descriptor->Channel : Layer.Channel);
+			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputAvailability, Index) = Descriptor && Descriptor->bAvailable && Layer.Weight > 0.0f ? 1u : 0u;
+			Parameters.InputDefaults[Index] = Descriptor ? Descriptor->DefaultValue : FVector4f(0.0f, 0.0f, 0.0f, 1.0f);
+		}
+	}
 
 	static FScreenPassTextureSlice AddVolumePass(
 		FRDGBuilder& GraphBuilder,
@@ -161,6 +201,7 @@ namespace
 		PassParameters->Priority = float(Volume.GetPriority());
 		PassParameters->bShadowColorVolumeValid = Volume.bShadowColorVolumeValid ? 1u : 0u;
 		PassParameters->DebugView = DebugView;
+		FillDefaultInputBinding(*PassParameters);
 		for (int32 Index = 0; Index < CurveSampleCount; ++Index)
 		{
 			// Scalar shader arrays use UE's packed layout; write them through the matching helper.

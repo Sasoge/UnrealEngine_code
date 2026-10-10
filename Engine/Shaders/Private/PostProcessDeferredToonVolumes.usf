@@ -21,6 +21,13 @@ float BlendWeight;
 float Priority;
 uint bShadowColorVolumeValid;
 uint DebugView;
+// [DeferredToon] Semantic bindings are packed in fixed-size arrays.  The
+// registry can add providers without changing this shader's parameter layout.
+uint4 InputIds[2];
+uint4 InputChannels[2];
+uint4 InputAvailability[2];
+float4 InputDefaults[8];
+uint InputNumLayers;
 // [DeferredToon] Keep the HLSL declaration explicitly packed as four float4
 // registers.  The matching C++ SHADER_PARAMETER_SCALAR_ARRAY(float, ...)
 // uses UE's packed FVector4f representation; relying on the helper macro here
@@ -44,6 +51,77 @@ float4 SampleColorCurve(float Value, float4 Samples[16])
 	return lerp(Samples[Index], Samples[Index + 1], frac(Position));
 }
 
+float SelectDeferredToonChannel(float4 Value, uint Channel)
+{
+	switch (Channel)
+	{
+	case 1u: return Value.r;
+	case 2u: return Value.g;
+	case 3u: return Value.b;
+	case 4u: return Value.a;
+	case 5u: return dot(Value.rgb, float3(0.2126f, 0.7152f, 0.0722f));
+	default: return Value.r;
+	}
+}
+
+// [DeferredToon] Resolve one semantic layer against the current scene inputs.
+// The evaluator owns source decoding; the box pass only consumes semantic data.
+float4 EvaluateDeferredToonInput(uint LayerIndex, float2 UV, FGBufferData GBufferData)
+{
+	if (LayerIndex >= InputNumLayers)
+	{
+		return InputDefaults[LayerIndex];
+	}
+
+	const uint InputId = GET_SCALAR_ARRAY_ELEMENT(InputIds, LayerIndex);
+	const uint Channel = GET_SCALAR_ARRAY_ELEMENT(InputChannels, LayerIndex);
+	const uint bAvailable = GET_SCALAR_ARRAY_ELEMENT(InputAvailability, LayerIndex);
+	if (bAvailable == 0u)
+	{
+		return InputDefaults[LayerIndex];
+	}
+
+	float4 SourceValue = InputDefaults[LayerIndex];
+	switch (InputId)
+	{
+	case 1u: // DirectLight: unshadowed lighting contribution plus alpha mask.
+		SourceValue = SceneTexturesStruct.LightingBufferTexture.SampleLevel(GlobalBilinearClampedSampler, UV, 0);
+		break;
+	case 2u: // NativeShadow: temporally stabilized native visibility.
+		SourceValue = float4(ShadowBufferTexture.SampleLevel(ShadowBufferSampler, UV, 0).rrr, 1.0f);
+		break;
+	case 3u: // ShadowChannel: subtraction mask exported in LightingBuffer alpha.
+		SourceValue = float4(SceneTexturesStruct.LightingBufferTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).aaaa);
+		break;
+	case 4u: // AmbientOcclusion.
+		SourceValue = SceneTexturesStruct.ScreenSpaceAOTexture.SampleLevel(SceneTexturesStruct_ScreenSpaceAOTextureSampler, UV, 0);
+		break;
+	case 5u: // BaseColor.
+		SourceValue = float4(GBufferData.BaseColor, 1.0f);
+		break;
+	case 6u: // WorldNormal, encoded for stable color-space inspection.
+		SourceValue = float4(GBufferData.WorldNormal * 0.5f + 0.5f, 1.0f);
+		break;
+	case 7u: // Roughness.
+		SourceValue = float4(GBufferData.Roughness.xxx, 1.0f);
+		break;
+	case 8u: // ShadingModel.
+		SourceValue = float4((float)GBufferData.ShadingModelID / 255.0f, 0.0f, 0.0f, 1.0f);
+		break;
+	case 9u: // Linearized depth is decoded from the scene depth RT.
+		SourceValue = SceneTexturesStruct.SceneDepthTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+		break;
+	case 10u: // Velocity remains available for the next temporal layer pass.
+		SourceValue = SceneTexturesStruct.GBufferVelocityTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+		break;
+	default:
+		return InputDefaults[LayerIndex];
+	}
+
+	const float SelectedValue = SelectDeferredToonChannel(SourceValue, Channel);
+	return Channel == 0u ? SourceValue : float4(SelectedValue.xxx, SelectedValue);
+}
+
 void MainPS(
 	noperspective float4 UVAndScreenPos : TEXCOORD0,
 	FStereoVSOutput StereoOutput,
@@ -65,6 +143,19 @@ void MainPS(
 	const float3 LocalPosition = mul(float4(WorldPosition, 1.0f), WorldToLocal).xyz;
 	// GBuffer presence distinguishes real deferred surfaces from sky/background pixels.
 	const FGBufferData GBufferData = GetGBufferData(UV);
+	// [DeferredToon] Resolve the fixed first-stage stack through semantic IDs;
+	// profiles later provide the same evaluator with authored layers.
+	const float4 DirectLightInput = EvaluateDeferredToonInput(0u, UV, GBufferData);
+	const float4 NativeShadowInput = EvaluateDeferredToonInput(1u, UV, GBufferData);
+	const float4 ShadowChannelInput = EvaluateDeferredToonInput(2u, UV, GBufferData);
+	const float4 AmbientOcclusionInput = EvaluateDeferredToonInput(3u, UV, GBufferData);
+	const float4 BaseColorInput = EvaluateDeferredToonInput(4u, UV, GBufferData);
+	const float4 WorldNormalInput = EvaluateDeferredToonInput(5u, UV, GBufferData);
+	const float4 RoughnessInput = EvaluateDeferredToonInput(6u, UV, GBufferData);
+	const float4 ShadingModelInput = EvaluateDeferredToonInput(7u, UV, GBufferData);
+	// Keep the named values live in this first-stage pass so shader compilers do
+	// not remove the contract before later layer composition is added.
+	const float SemanticInputKeepAlive = DirectLightInput.a + AmbientOcclusionInput.a + BaseColorInput.a + WorldNormalInput.a + RoughnessInput.a + ShadingModelInput.a;
 	const float3 NormalizedPosition = LocalPosition / max(LocalBoxExtent * 2.0f, 1e-3f) + 0.5f;
 	const float3 DistanceToEdge = min(NormalizedPosition, 1.0f - NormalizedPosition);
 	const float EdgeDistance = min(DistanceToEdge.x, min(DistanceToEdge.y, DistanceToEdge.z));
@@ -78,15 +169,17 @@ void MainPS(
 	const float SurfaceMask = saturate(dot(GBufferData.WorldNormal, GBufferData.WorldNormal));
 	const float Weight = saturate(BoxWeight * FalloffWeight * BlendWeight) * SurfaceMask;
 
-	const float4 LightingBufferSample = SceneTexturesStruct.LightingBufferTexture.SampleLevel(GlobalBilinearClampedSampler, UV, 0);
+	const float4 LightingBufferSample = DirectLightInput;
 	const float LightingValue = dot(LightingBufferSample.rgb, float3(0.2126f, 0.7152f, 0.0722f));
 	// [DeferredToon] Native UE occlusion and Shadow Channel subtraction are
 	// exported separately. Both masks use this same box weight, then form a
 	// union so overlapping masks do not apply the tint twice.
 	// [DeferredToon] Use the temporally stabilized scalar supplied by the C++
 	// pass.  LightingBuffer remains the native current-frame accumulation.
-	const float NativeShadowValue = saturate(ShadowBufferTexture.SampleLevel(ShadowBufferSampler, UV, 0).r);
-	const float ShadowChannelValue = saturate(LightingBufferSample.a);
+	const float NativeShadowValue = saturate(NativeShadowInput.r);
+	// LightingBufferSample.a is now resolved through the ShadowChannel semantic;
+	// retaining this source name documents the channel contract for legacy users.
+	const float ShadowChannelValue = saturate(ShadowChannelInput.r);
 	const float NativeShadowContribution = NativeShadowValue;
 	const float ShadowChannelContribution = ShadowChannelValue * (1.0f - NativeShadowValue);
 	const float CombinedShadowValue = saturate(NativeShadowContribution + ShadowChannelContribution);
