@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/DeferredToonInputRegistry.h"
 #include "Math/Color.h"
 
 class UDeferredToonVolumeComponent;
@@ -36,6 +37,10 @@ public:
     // [DeferredToon] Snapshot the enum as POD so the render thread never
     // retains a UObject/component reference.
     uint8 OutputMode = 0;
+    // [DeferredToon] Only fixed POD data crosses to the renderer; the asset
+    // pointer itself remains owned by the component/editor side.
+    bool bUseStyleProfile = false;
+    FDeferredToonInputStack InputStack;
     int32 Priority = 0;
     int32 ObjectID = 0;
     uint32 StableSortKey = 1;

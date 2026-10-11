@@ -8,6 +8,7 @@ class UCurveFloat;
 class UCurveLinearColor;
 class UCurveBase;
 class UVolumeTexture;
+class UDeferredToonStyleProfile;
 class FDeferredToonVolumeSceneProxy;
 
 // [DeferredToon] Explicit output policy keeps the legacy composite as the safe
@@ -57,6 +58,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume")
     EDeferredToonVolumeOutputMode OutputMode;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume")
+    TObjectPtr<UDeferredToonStyleProfile> StyleProfile;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume", meta=(ClampMin="-2147483648", ClampMax="2147483647"))
     int32 Priority;
 
@@ -74,6 +78,7 @@ public:
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowColorCurve(UCurveLinearColor* NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetBlendWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOutputMode(EDeferredToonVolumeOutputMode NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetStyleProfile(UDeferredToonStyleProfile* NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetPriority(int32 NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetObjectID(int32 NewValue);
 

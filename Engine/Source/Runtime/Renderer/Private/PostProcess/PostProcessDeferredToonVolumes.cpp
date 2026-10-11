@@ -123,7 +123,7 @@ namespace
 	// fixed in capacity.  It exercises the scene-input contract before profiles
 	// are introduced; profile layers will replace this list without changing the
 	// shader ABI.
-	static void FillDefaultInputBinding(FDeferredToonVolumePS::FParameters& Parameters)
+	static void FillInputBinding(FDeferredToonVolumePS::FParameters& Parameters, const FDeferredToonVolumeSceneProxy& Volume)
 	{
 		static constexpr EDeferredToonInputId DefaultInputs[InputLayerCount] =
 		{
@@ -137,11 +137,13 @@ namespace
 			EDeferredToonInputId::ShadingModel,
 		};
 
-		Parameters.InputNumLayers = InputLayerCount;
+		const bool bUseProfile = Volume.bUseStyleProfile && Volume.InputStack.NumLayers > 0;
+		Parameters.InputNumLayers = bUseProfile ? FMath::Min<uint32>(Volume.InputStack.NumLayers, InputLayerCount) : InputLayerCount;
 		for (int32 Index = 0; Index < InputLayerCount; ++Index)
 		{
-			const EDeferredToonInputId InputId = DefaultInputs[Index];
-			const FDeferredToonInputLayer Layer = FDeferredToonInputRegistry::MakeFallbackLayer(InputId);
+			const FDeferredToonInputLayer Layer = bUseProfile
+				? Volume.InputStack.Layers[Index]
+				: FDeferredToonInputRegistry::MakeFallbackLayer(DefaultInputs[Index]);
 			const FDeferredToonInputDescriptor* Descriptor = FDeferredToonInputRegistry::ResolveDescriptor(Layer.InputId);
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputIds, Index) = static_cast<uint32>(Layer.InputId);
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputChannels, Index) = static_cast<uint32>(Descriptor ? Descriptor->Channel : Layer.Channel);
@@ -209,7 +211,7 @@ namespace
 		PassParameters->Priority = float(Volume.GetPriority());
 		PassParameters->bShadowColorVolumeValid = Volume.bShadowColorVolumeValid ? 1u : 0u;
 		PassParameters->DebugView = DebugView;
-		FillDefaultInputBinding(*PassParameters);
+		FillInputBinding(*PassParameters, Volume);
 		for (int32 Index = 0; Index < CurveSampleCount; ++Index)
 		{
 			// Scalar shader arrays use UE's packed layout; write them through the matching helper.

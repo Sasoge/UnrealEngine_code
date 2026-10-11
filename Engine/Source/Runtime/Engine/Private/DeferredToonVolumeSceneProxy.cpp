@@ -1,5 +1,7 @@
 #include "DeferredToonVolumeSceneProxy.h"
 #include "Components/DeferredToonVolumeComponent.h"
+#include "Engine/DeferredToonInputRegistry.h"
+#include "Engine/DeferredToonStyleProfile.h"
 #include "Curves/CurveFloat.h"
 #include "Curves/CurveLinearColor.h"
 #include "Engine/Texture.h"
@@ -17,6 +19,23 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     ShadowColorVolumeWeight = Component->ShadowColorVolumeWeight;
     BlendWeight = Component->BlendWeight;
     OutputMode = static_cast<uint8>(Component->OutputMode);
+    bUseStyleProfile = Component->StyleProfile != nullptr && Component->StyleProfile->Layers.Num() > 0;
+    if (bUseStyleProfile)
+    {
+        const int32 LayerCount = FMath::Min(Component->StyleProfile->Layers.Num(), FDeferredToonInputStack::MaxInputLayers);
+        InputStack.NumLayers = static_cast<uint32>(LayerCount);
+        for (int32 Index = 0; Index < LayerCount; ++Index)
+        {
+            const FDeferredToonStyleInputLayer& AuthoredLayer = Component->StyleProfile->Layers[Index];
+            FDeferredToonInputLayer& RuntimeLayer = InputStack.Layers[Index];
+            RuntimeLayer = FDeferredToonInputRegistry::MakeFallbackLayer(
+                static_cast<EDeferredToonInputId>(FMath::Clamp(AuthoredLayer.InputId, 0, 65535)));
+            RuntimeLayer.Channel = static_cast<EDeferredToonInputChannel>(FMath::Clamp(AuthoredLayer.Channel, 0, 5));
+            RuntimeLayer.Operation = static_cast<EDeferredToonLayerOperation>(FMath::Clamp(AuthoredLayer.Operation, 0, 2));
+            RuntimeLayer.bInvert = AuthoredLayer.bInvert ? 1u : 0u;
+            RuntimeLayer.Weight = FMath::Clamp(AuthoredLayer.Weight, 0.0f, 1.0f);
+        }
+    }
     Priority = Component->Priority;
     ObjectID = Component->ObjectID;
     StableSortPath = Component->GetPathName();
