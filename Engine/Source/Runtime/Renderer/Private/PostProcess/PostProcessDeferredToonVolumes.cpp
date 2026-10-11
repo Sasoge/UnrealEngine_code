@@ -24,7 +24,7 @@ namespace
 	TAutoConsoleVariable<int32> CVarDeferredToonVolumesDebugView(
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
-		TEXT("Deferred toon volume debug view: 0 normal, 1 weight, 2 volume color, 3 priority."),
+		TEXT("Deferred toon volume debug view: 0 NativeComposite, 1 weight, 2 volume color, 3 priority, 4-11 semantic layers."),
 		ECVF_RenderThreadSafe);
 
 	// [DeferredToon] VSM/SMRT uses View.StateFrameIndex for its blue-noise
@@ -104,6 +104,9 @@ namespace
 			SHADER_PARAMETER_SCALAR_ARRAY(uint32, InputIds, [InputLayerCount])
 			SHADER_PARAMETER_SCALAR_ARRAY(uint32, InputChannels, [InputLayerCount])
 			SHADER_PARAMETER_SCALAR_ARRAY(uint32, InputAvailability, [InputLayerCount])
+			SHADER_PARAMETER_SCALAR_ARRAY(float, InputWeights, [InputLayerCount])
+			SHADER_PARAMETER_SCALAR_ARRAY(uint32, InputInverts, [InputLayerCount])
+			SHADER_PARAMETER_SCALAR_ARRAY(uint32, InputOperations, [InputLayerCount])
 			SHADER_PARAMETER_ARRAY(FVector4f, InputDefaults, [InputLayerCount])
 			SHADER_PARAMETER(uint32, InputNumLayers)
 			SHADER_PARAMETER_SCALAR_ARRAY(float, FalloffSamples, [CurveSampleCount])
@@ -142,6 +145,9 @@ namespace
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputIds, Index) = static_cast<uint32>(Layer.InputId);
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputChannels, Index) = static_cast<uint32>(Descriptor ? Descriptor->Channel : Layer.Channel);
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputAvailability, Index) = Descriptor && Descriptor->bAvailable && Layer.Weight > 0.0f ? 1u : 0u;
+			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputWeights, Index) = Layer.Weight;
+			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputInverts, Index) = Layer.bInvert;
+			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputOperations, Index) = static_cast<uint32>(Layer.Operation);
 			Parameters.InputDefaults[Index] = Descriptor ? Descriptor->DefaultValue : FVector4f(0.0f, 0.0f, 0.0f, 1.0f);
 		}
 	}
@@ -317,7 +323,7 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 3);
+	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 11);
 }
 
 FRDGTextureRef AddDeferredToonShadowBufferTemporalPass(

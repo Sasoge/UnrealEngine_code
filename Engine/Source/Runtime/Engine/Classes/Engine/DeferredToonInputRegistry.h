@@ -59,6 +59,15 @@ enum class EDeferredToonInputColorSpace : uint8
 	Encoded,
 };
 
+// [DeferredToon] Layer operations are data, not shader permutations.  This
+// keeps the authoring contract extensible while preserving one shader path.
+enum class EDeferredToonLayerOperation : uint8
+{
+	Multiply = 0,
+	Add,
+	Replace,
+};
+
 // [DeferredToon] This descriptor is metadata only.  It deliberately contains
 // no per-frame RDG/RHI handles; a provider resolves the source at render time.
 struct FDeferredToonInputDescriptor
@@ -81,6 +90,7 @@ struct FDeferredToonInputLayer
 {
 	EDeferredToonInputId InputId = EDeferredToonInputId::Unknown;
 	EDeferredToonInputChannel Channel = EDeferredToonInputChannel::RGB;
+	EDeferredToonLayerOperation Operation = EDeferredToonLayerOperation::Multiply;
 	uint8 bInvert = 0;
 	float Weight = 1.0f;
 };

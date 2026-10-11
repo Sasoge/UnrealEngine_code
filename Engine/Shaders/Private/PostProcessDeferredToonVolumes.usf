@@ -26,6 +26,9 @@ uint DebugView;
 uint4 InputIds[2];
 uint4 InputChannels[2];
 uint4 InputAvailability[2];
+float4 InputWeights[2];
+uint4 InputInverts[2];
+uint4 InputOperations[2];
 float4 InputDefaults[8];
 uint InputNumLayers;
 // [DeferredToon] Keep the HLSL declaration explicitly packed as four float4
@@ -122,6 +125,44 @@ float4 EvaluateDeferredToonInput(uint LayerIndex, float2 UV, FGBufferData GBuffe
 	return Channel == 0u ? SourceValue : float4(SelectedValue.xxx, SelectedValue);
 }
 
+// [DeferredToon] Compose the fixed first-stage semantic stack.  The operation
+// is selected from packed data so adding a layer never creates a permutation.
+void ComposeDeferredToonStyleLayers(
+	float2 UV,
+	FGBufferData GBufferData,
+	out float3 StyleColor,
+	out float StyleMask)
+{
+	StyleColor = 1.0f.xxx;
+	StyleMask = 0.0f;
+	for (uint LayerIndex = 0u; LayerIndex < InputNumLayers; ++LayerIndex)
+	{
+		float4 InputValue = EvaluateDeferredToonInput(LayerIndex, UV, GBufferData);
+		const uint bInvert = GET_SCALAR_ARRAY_ELEMENT(InputInverts, LayerIndex);
+		const float LayerWeight = saturate(GET_SCALAR_ARRAY_ELEMENT(InputWeights, LayerIndex));
+		const uint Operation = GET_SCALAR_ARRAY_ELEMENT(InputOperations, LayerIndex);
+		if (bInvert != 0u)
+		{
+			InputValue = 1.0f.xxxx - InputValue;
+		}
+
+		const float LayerScalar = saturate(dot(InputValue.rgb, float3(0.2126f, 0.7152f, 0.0722f)));
+		StyleMask = max(StyleMask, LayerScalar * LayerWeight);
+		if (Operation == 1u)
+		{
+			StyleColor += InputValue.rgb * LayerWeight;
+		}
+		else if (Operation == 2u)
+		{
+			StyleColor = lerp(StyleColor, InputValue.rgb, LayerWeight);
+		}
+		else
+		{
+			StyleColor *= lerp(1.0f.xxx, InputValue.rgb, LayerWeight);
+		}
+	}
+}
+
 void MainPS(
 	noperspective float4 UVAndScreenPos : TEXCOORD0,
 	FStereoVSOutput StereoOutput,
@@ -153,6 +194,9 @@ void MainPS(
 	const float4 WorldNormalInput = EvaluateDeferredToonInput(5u, UV, GBufferData);
 	const float4 RoughnessInput = EvaluateDeferredToonInput(6u, UV, GBufferData);
 	const float4 ShadingModelInput = EvaluateDeferredToonInput(7u, UV, GBufferData);
+	float3 StyleColor;
+	float StyleMask;
+	ComposeDeferredToonStyleLayers(UV, GBufferData, StyleColor, StyleMask);
 	// Keep the named values live in this first-stage pass so shader compilers do
 	// not remove the contract before later layer composition is added.
 	const float SemanticInputKeepAlive = DirectLightInput.a + AmbientOcclusionInput.a + BaseColorInput.a + WorldNormalInput.a + RoughnessInput.a + ShadingModelInput.a;
@@ -207,8 +251,42 @@ void MainPS(
 	{
 		OutColor = float4(saturate(abs(Priority) / 16.0f).xxx, 1.0f);
 	}
+	else if (DebugView == 4)
+	{
+		OutColor = float4(saturate(DirectLightInput.rgb), 1.0f);
+	}
+	else if (DebugView == 5)
+	{
+		OutColor = float4(NativeShadowInput.rrr, 1.0f);
+	}
+	else if (DebugView == 6)
+	{
+		OutColor = float4(ShadowChannelInput.rrr, 1.0f);
+	}
+	else if (DebugView == 7)
+	{
+		OutColor = float4(saturate(BaseColorInput.rgb), 1.0f);
+	}
+	else if (DebugView == 8)
+	{
+		OutColor = float4(saturate(WorldNormalInput.rgb), 1.0f);
+	}
+	else if (DebugView == 9)
+	{
+		OutColor = float4(AmbientOcclusionInput.rrr, 1.0f);
+	}
+	else if (DebugView == 10)
+	{
+		OutColor = float4(StyleMask.xxx, 1.0f);
+	}
+	else if (DebugView == 11)
+	{
+		OutColor = float4(saturate(StyleColor), 1.0f);
+	}
 	else
 	{
+		// [DeferredToon] NativeComposite keeps the legacy output path intact;
+		// semantic layer debug views above never write into this mode.
 		const float3 MappedLighting = SceneColor.rgb * max(LightingColor.rgb, 0.0f);
 		const float3 ShadowedLighting = MappedLighting * lerp(1.0f.xxx, ShadowTint, CombinedShadowValue);
 		OutColor = float4(lerp(SceneColor.rgb, ShadowedLighting, Weight), SceneColor.a);
