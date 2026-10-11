@@ -27,7 +27,7 @@ enum class EDeferredToonVolumeOutputMode : uint8
 UENUM(BlueprintType)
 enum class EDeferredToonDebugView : uint8
 {
-    Invalid = 0 UMETA(Hidden),
+    NativeComposite = 0 UMETA(DisplayName="0 - Native Composite"),
     BoxInfluence = 1 UMETA(DisplayName="1 - Box Influence"),
     ShadowComposite = 2 UMETA(DisplayName="2 - Shadow Composite"),
     Priority = 3 UMETA(DisplayName="3 - Priority"),
