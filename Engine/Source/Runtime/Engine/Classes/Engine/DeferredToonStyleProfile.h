@@ -4,6 +4,55 @@
 #include "Engine/DataAsset.h"
 #include "DeferredToonStyleProfile.generated.h"
 
+// [DeferredToon] These editor-facing enums keep the volume details panel
+// self-documenting while preserving the same stable numeric IDs used by the
+// render-thread registry and existing serialized profiles.
+UENUM(BlueprintType)
+enum class EDeferredToonStyleInputId : uint8
+{
+    Unknown = 0 UMETA(DisplayName="None"),
+    DirectLight = 1 UMETA(DisplayName="Direct Light"),
+    NativeShadow = 2 UMETA(DisplayName="Native Shadow"),
+    ShadowChannel = 3 UMETA(DisplayName="Shadow Channel"),
+    AmbientOcclusion = 4 UMETA(DisplayName="Ambient Occlusion"),
+    BaseColor = 5 UMETA(DisplayName="Base Color"),
+    WorldNormal = 6 UMETA(DisplayName="World Normal"),
+    Roughness = 7 UMETA(DisplayName="Roughness"),
+    ShadingModel = 8 UMETA(DisplayName="Shading Model"),
+    Depth = 9 UMETA(DisplayName="Depth"),
+    Velocity = 10 UMETA(DisplayName="Velocity"),
+    DeprecatedShadowBuffer = 100 UMETA(DisplayName="Deprecated Shadow Buffer"),
+};
+
+UENUM(BlueprintType)
+enum class EDeferredToonStyleInputChannel : uint8
+{
+    RGB = 0 UMETA(DisplayName="RGB"),
+    R = 1 UMETA(DisplayName="Red"),
+    G = 2 UMETA(DisplayName="Green"),
+    B = 3 UMETA(DisplayName="Blue"),
+    A = 4 UMETA(DisplayName="Alpha"),
+    Luminance = 5 UMETA(DisplayName="Luminance"),
+};
+
+UENUM(BlueprintType)
+enum class EDeferredToonStyleLayerOperation : uint8
+{
+    Multiply = 0 UMETA(DisplayName="Multiply"),
+    Add = 1 UMETA(DisplayName="Add"),
+    Replace = 2 UMETA(DisplayName="Replace"),
+};
+
+// [DeferredToon] A component can be driven by the built-in stack, an inline
+// stack for quick iteration, or a reusable data asset for production content.
+UENUM(BlueprintType)
+enum class EDeferredToonStyleSource : uint8
+{
+    StyleProfile = 0 UMETA(DisplayName="Style Profile"),
+    InlineLayers = 1 UMETA(DisplayName="Inline Layers"),
+    DefaultStack = 2 UMETA(DisplayName="Default RT Stack"),
+};
+
 // [DeferredToon] Data-asset layer metadata uses stable numeric IDs so the
 // registry can add or retire render targets without changing this asset ABI.
 USTRUCT(BlueprintType)
@@ -11,14 +60,14 @@ struct ENGINE_API FDeferredToonStyleInputLayer
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Layer", meta=(ClampMin="0", ClampMax="65535"))
-    int32 InputId = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Layer")
+    EDeferredToonStyleInputId InputId = EDeferredToonStyleInputId::Unknown;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Layer", meta=(ClampMin="0", ClampMax="5"))
-    int32 Channel = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Layer")
+    EDeferredToonStyleInputChannel Channel = EDeferredToonStyleInputChannel::RGB;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Layer", meta=(ClampMin="0", ClampMax="2"))
-    int32 Operation = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Layer")
+    EDeferredToonStyleLayerOperation Operation = EDeferredToonStyleLayerOperation::Multiply;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Layer")
     bool bInvert = false;

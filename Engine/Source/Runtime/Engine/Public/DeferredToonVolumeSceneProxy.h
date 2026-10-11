@@ -40,6 +40,7 @@ public:
     // [DeferredToon] Only fixed POD data crosses to the renderer; the asset
     // pointer itself remains owned by the component/editor side.
     bool bUseStyleProfile = false;
+    bool bUseInlineStyleLayers = false;
     FDeferredToonInputStack InputStack;
     int32 Priority = 0;
     int32 ObjectID = 0;

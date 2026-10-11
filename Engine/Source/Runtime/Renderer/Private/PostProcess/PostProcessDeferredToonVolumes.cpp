@@ -137,7 +137,9 @@ namespace
 			EDeferredToonInputId::ShadingModel,
 		};
 
-		const bool bUseProfile = Volume.bUseStyleProfile && Volume.InputStack.NumLayers > 0;
+		// [DeferredToon] Both authoring paths feed the same fixed renderer ABI:
+		// the component inline stack is only a convenience for the details panel.
+		const bool bUseProfile = (Volume.bUseStyleProfile || Volume.bUseInlineStyleLayers) && Volume.InputStack.NumLayers > 0;
 		Parameters.InputNumLayers = bUseProfile ? FMath::Min<uint32>(Volume.InputStack.NumLayers, InputLayerCount) : InputLayerCount;
 		for (int32 Index = 0; Index < InputLayerCount; ++Index)
 		{

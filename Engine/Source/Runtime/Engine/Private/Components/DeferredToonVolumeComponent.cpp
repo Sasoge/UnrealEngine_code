@@ -31,6 +31,7 @@ UDeferredToonVolumeComponent::UDeferredToonVolumeComponent(const FObjectInitiali
     , ShadowColorCurve(nullptr)
     , BlendWeight(1.0f)
     , OutputMode(EDeferredToonVolumeOutputMode::NativeComposite)
+    , StyleSource(EDeferredToonStyleSource::StyleProfile)
     , StyleProfile(nullptr)
     , Priority(0)
     , ObjectID(0)
@@ -184,6 +185,7 @@ void UDeferredToonVolumeComponent::SetLightingColorCurve(UCurveLinearColor* NewV
 void UDeferredToonVolumeComponent::SetShadowColorCurve(UCurveLinearColor* NewValue) { DTOON_SET(ShadowColorCurve, NewValue, BindCurveDelegates(); MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetBlendWeight(float NewValue) { DTOON_SET(BlendWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetOutputMode(EDeferredToonVolumeOutputMode NewValue) { DTOON_SET(OutputMode, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetStyleSource(EDeferredToonStyleSource NewValue) { DTOON_SET(StyleSource, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetStyleProfile(UDeferredToonStyleProfile* NewValue) { DTOON_SET(StyleProfile, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetPriority(int32 NewValue) { DTOON_SET(Priority, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetObjectID(int32 NewValue)

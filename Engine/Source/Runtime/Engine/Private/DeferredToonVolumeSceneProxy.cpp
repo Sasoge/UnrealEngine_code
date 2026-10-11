@@ -19,19 +19,31 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     ShadowColorVolumeWeight = Component->ShadowColorVolumeWeight;
     BlendWeight = Component->BlendWeight;
     OutputMode = static_cast<uint8>(Component->OutputMode);
-    bUseStyleProfile = Component->StyleProfile != nullptr && Component->StyleProfile->Layers.Num() > 0;
+    bUseStyleProfile = Component->StyleSource == EDeferredToonStyleSource::StyleProfile &&
+        Component->StyleProfile != nullptr && Component->StyleProfile->Layers.Num() > 0;
+    bUseInlineStyleLayers = Component->StyleSource == EDeferredToonStyleSource::InlineLayers &&
+        Component->StyleLayers.Num() > 0;
+    const TArray<FDeferredToonStyleInputLayer>* AuthoredLayers = nullptr;
     if (bUseStyleProfile)
     {
-        const int32 LayerCount = FMath::Min(Component->StyleProfile->Layers.Num(), FDeferredToonInputStack::MaxInputLayers);
+        AuthoredLayers = &Component->StyleProfile->Layers;
+    }
+    else if (bUseInlineStyleLayers)
+    {
+        AuthoredLayers = &Component->StyleLayers;
+    }
+    if (AuthoredLayers)
+    {
+        const int32 LayerCount = FMath::Min(AuthoredLayers->Num(), FDeferredToonInputStack::MaxInputLayers);
         InputStack.NumLayers = static_cast<uint32>(LayerCount);
         for (int32 Index = 0; Index < LayerCount; ++Index)
         {
-            const FDeferredToonStyleInputLayer& AuthoredLayer = Component->StyleProfile->Layers[Index];
+            const FDeferredToonStyleInputLayer& AuthoredLayer = (*AuthoredLayers)[Index];
             FDeferredToonInputLayer& RuntimeLayer = InputStack.Layers[Index];
             RuntimeLayer = FDeferredToonInputRegistry::MakeFallbackLayer(
-                static_cast<EDeferredToonInputId>(FMath::Clamp(AuthoredLayer.InputId, 0, 65535)));
-            RuntimeLayer.Channel = static_cast<EDeferredToonInputChannel>(FMath::Clamp(AuthoredLayer.Channel, 0, 5));
-            RuntimeLayer.Operation = static_cast<EDeferredToonLayerOperation>(FMath::Clamp(AuthoredLayer.Operation, 0, 2));
+                static_cast<EDeferredToonInputId>(static_cast<uint16>(AuthoredLayer.InputId)));
+            RuntimeLayer.Channel = static_cast<EDeferredToonInputChannel>(static_cast<uint8>(AuthoredLayer.Channel));
+            RuntimeLayer.Operation = static_cast<EDeferredToonLayerOperation>(static_cast<uint8>(AuthoredLayer.Operation));
             RuntimeLayer.bInvert = AuthoredLayer.bInvert ? 1u : 0u;
             RuntimeLayer.Weight = FMath::Clamp(AuthoredLayer.Weight, 0.0f, 1.0f);
         }
