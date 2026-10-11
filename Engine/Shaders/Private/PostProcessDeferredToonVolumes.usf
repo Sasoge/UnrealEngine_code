@@ -18,6 +18,7 @@ float3 LocalBoxExtent;
 float EdgeFalloff;
 float ShadowColorVolumeWeight;
 float BlendWeight;
+uint OutputMode;
 float Priority;
 uint bShadowColorVolumeValid;
 uint DebugView;
