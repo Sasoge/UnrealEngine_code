@@ -37,6 +37,9 @@ public:
     // [DeferredToon] Snapshot the enum as POD so the render thread never
     // retains a UObject/component reference.
     uint8 OutputMode = 0;
+    // [DeferredToon] 255 means use the global console variable; values 1-11
+    // are the editor-facing per-volume debug selector.
+    uint8 DebugView = 255;
     // [DeferredToon] Only fixed POD data crosses to the renderer; the asset
     // pointer itself remains owned by the component/editor side.
     bool bUseStyleProfile = false;

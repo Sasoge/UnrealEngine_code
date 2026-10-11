@@ -166,7 +166,11 @@ namespace
 	{
 		const FScreenPassTexture Input = FScreenPassTexture::CopyFromSlice(GraphBuilder, SceneColor);
 		const FScreenPassTextureViewport InputViewport(Input);
-		const uint32 DebugView = uint32(GetDeferredToonVolumeDebugView());
+		// [DeferredToon] The details-panel selector is a per-volume remote
+		// control.  255 preserves the legacy global console variable path.
+		const uint32 DebugView = Volume.DebugView == 255u
+			? uint32(GetDeferredToonVolumeDebugView())
+			: FMath::Min<uint32>(Volume.DebugView, 11u);
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial

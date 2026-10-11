@@ -21,6 +21,27 @@ enum class EDeferredToonVolumeOutputMode : uint8
     Replace UMETA(DisplayName="Replace"),
 };
 
+// [DeferredToon] Details-panel selector for the same semantic views exposed by
+// r.Toon.DeferredVolumes.DebugView.  Console / Global keeps the legacy CVar
+// behavior when no per-volume override is desired.
+UENUM(BlueprintType)
+enum class EDeferredToonDebugView : uint8
+{
+    Invalid = 0 UMETA(Hidden),
+    BoxInfluence = 1 UMETA(DisplayName="1 - Box Influence"),
+    ShadowComposite = 2 UMETA(DisplayName="2 - Shadow Composite"),
+    Priority = 3 UMETA(DisplayName="3 - Priority"),
+    DirectLight = 4 UMETA(DisplayName="4 - Direct Light"),
+    NativeShadow = 5 UMETA(DisplayName="5 - Native Shadow"),
+    ShadowChannel = 6 UMETA(DisplayName="6 - Shadow Channel"),
+    BaseColor = 7 UMETA(DisplayName="7 - Base Color"),
+    WorldNormal = 8 UMETA(DisplayName="8 - World Normal"),
+    AmbientOcclusion = 9 UMETA(DisplayName="9 - Ambient Occlusion"),
+    StyleMask = 10 UMETA(DisplayName="10 - Style Mask"),
+    StyleColor = 11 UMETA(DisplayName="11 - Style Color"),
+    ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
+};
+
 // [DeferredToon] Asset-facing component for pre-tonemap multi-box color mapping.
 UCLASS(ClassGroup=(Rendering), meta=(BlueprintSpawnableComponent), hidecategories=(Object, Mobility, Activation), MinimalAPI)
 class UDeferredToonVolumeComponent : public USceneComponent
@@ -58,6 +79,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume")
     EDeferredToonVolumeOutputMode OutputMode;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Debug")
+    EDeferredToonDebugView DebugView;
+
     // [DeferredToon] This is the editor-facing switch for the authoring UI.
     // StyleProfile remains the reusable asset path; InlineLayers is intended
     // for fast iteration directly on the placed volume.
@@ -87,6 +111,7 @@ public:
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowColorCurve(UCurveLinearColor* NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetBlendWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOutputMode(EDeferredToonVolumeOutputMode NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDebugView(EDeferredToonDebugView NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetStyleSource(EDeferredToonStyleSource NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetStyleProfile(UDeferredToonStyleProfile* NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetPriority(int32 NewValue);

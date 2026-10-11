@@ -19,6 +19,7 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     ShadowColorVolumeWeight = Component->ShadowColorVolumeWeight;
     BlendWeight = Component->BlendWeight;
     OutputMode = static_cast<uint8>(Component->OutputMode);
+    DebugView = static_cast<uint8>(Component->DebugView);
     bUseStyleProfile = Component->StyleSource == EDeferredToonStyleSource::StyleProfile &&
         Component->StyleProfile != nullptr && Component->StyleProfile->Layers.Num() > 0;
     bUseInlineStyleLayers = Component->StyleSource == EDeferredToonStyleSource::InlineLayers &&
