@@ -97,7 +97,10 @@ struct FDeferredToonInputLayer
 
 struct FDeferredToonInputStack
 {
-	static constexpr int32 MaxInputLayers = 8;
+	// [DeferredToon] Keep one slot for every built-in semantic input.  The
+	// capacity is fixed for shader ABI stability, while future providers can
+	// still be selected through the same bounded profile list.
+	static constexpr int32 MaxInputLayers = 12;
 	TStaticArray<FDeferredToonInputLayer, MaxInputLayers> Layers;
 	uint32 NumLayers = 0;
 };
@@ -107,7 +110,7 @@ struct FDeferredToonInputStack
 class FDeferredToonInputRegistry
 {
 public:
-	static constexpr uint32 InputContractVersion = 1;
+	static constexpr uint32 InputContractVersion = 2;
 
 	static ENGINE_API const TArray<FDeferredToonInputDescriptor>& GetDescriptors();
 	static ENGINE_API const FDeferredToonInputDescriptor* ResolveDescriptor(EDeferredToonInputId InputId);

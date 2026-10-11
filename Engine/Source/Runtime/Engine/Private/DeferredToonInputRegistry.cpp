@@ -47,7 +47,10 @@ namespace DeferredToonInputRegistryPrivate
 			Add(EDeferredToonInputId::Roughness, TEXT("Roughness"), EDeferredToonInputSource::GBuffer, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Linear, FVector4f(1.0f, 1.0f, 1.0f, 1.0f), true);
 			Add(EDeferredToonInputId::ShadingModel, TEXT("ShadingModel"), EDeferredToonInputSource::GBuffer, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Encoded, FVector4f(0.0f, 0.0f, 0.0f, 1.0f), true);
 			Add(EDeferredToonInputId::Depth, TEXT("Depth"), EDeferredToonInputSource::SceneTextures, EDeferredToonInputChannel::R, EDeferredToonInputDecode::DeviceZToLinear, EDeferredToonInputColorSpace::Linear, FVector4f(1.0f, 1.0f, 1.0f, 1.0f), true);
-			Add(EDeferredToonInputId::Velocity, TEXT("Velocity"), EDeferredToonInputSource::SceneTextures, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Encoded, FVector4f(0.0f, 0.0f, 0.0f, 1.0f), false);
+			// [DeferredToon] The uniform always supplies a velocity texture (a black
+			// fallback when motion vectors are disabled), so the semantic remains
+			// selectable without a shader permutation or a special asset case.
+			Add(EDeferredToonInputId::Velocity, TEXT("Velocity"), EDeferredToonInputSource::SceneTextures, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Encoded, FVector4f(0.0f, 0.0f, 0.0f, 1.0f), true);
 			Add(EDeferredToonInputId::DeprecatedShadowBuffer, TEXT("DeprecatedShadowBuffer"), EDeferredToonInputSource::ShadowBuffer, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Linear, FVector4f(1.0f, 1.0f, 1.0f, 1.0f), false, true, EDeferredToonInputId::NativeShadow);
 			return Result;
 		}();

@@ -24,7 +24,7 @@ namespace
 	TAutoConsoleVariable<int32> CVarDeferredToonVolumesDebugView(
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
-		TEXT("Deferred toon volume debug view: 0 NativeComposite, 1 weight, 2 volume color, 3 priority, 4-11 semantic layers."),
+		TEXT("Deferred toon volume debug view: 0 NativeComposite, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers."),
 		ECVF_RenderThreadSafe);
 
 	class FDeferredToonVolumePS : public FGlobalShader
@@ -93,6 +93,8 @@ namespace
 			EDeferredToonInputId::WorldNormal,
 			EDeferredToonInputId::Roughness,
 			EDeferredToonInputId::ShadingModel,
+			EDeferredToonInputId::Depth,
+			EDeferredToonInputId::Velocity,
 		};
 
 		// [DeferredToon] Both authoring paths feed the same fixed renderer ABI:
@@ -128,7 +130,7 @@ namespace
 		// control.  255 preserves the legacy global console variable path.
 		const uint32 DebugView = Volume.DebugView == 255u
 			? uint32(GetDeferredToonVolumeDebugView())
-			: FMath::Min<uint32>(Volume.DebugView, 11u);
+			: FMath::Min<uint32>(Volume.DebugView, 13u);
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial
@@ -196,7 +198,7 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 11);
+	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 13);
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(

@@ -39,6 +39,8 @@ enum class EDeferredToonDebugView : uint8
     AmbientOcclusion = 9 UMETA(DisplayName="9 - Ambient Occlusion"),
     StyleMask = 10 UMETA(DisplayName="10 - Style Mask"),
     StyleColor = 11 UMETA(DisplayName="11 - Style Color"),
+    Depth = 12 UMETA(DisplayName="12 - Linear Depth"),
+    Velocity = 13 UMETA(DisplayName="13 - Velocity"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 

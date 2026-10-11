@@ -24,13 +24,13 @@ uint bShadowColorVolumeValid;
 uint DebugView;
 // [DeferredToon] Semantic bindings are packed in fixed-size arrays.  The
 // registry can add providers without changing this shader's parameter layout.
-uint4 InputIds[2];
-uint4 InputChannels[2];
-uint4 InputAvailability[2];
-float4 InputWeights[2];
-uint4 InputInverts[2];
-uint4 InputOperations[2];
-float4 InputDefaults[8];
+uint4 InputIds[3];
+uint4 InputChannels[3];
+uint4 InputAvailability[3];
+float4 InputWeights[3];
+uint4 InputInverts[3];
+uint4 InputOperations[3];
+float4 InputDefaults[12];
 uint InputNumLayers;
 // [DeferredToon] Keep the HLSL declaration explicitly packed as four float4
 // registers.  The matching C++ SHADER_PARAMETER_SCALAR_ARRAY(float, ...)
@@ -91,7 +91,7 @@ float4 EvaluateDeferredToonInput(uint LayerIndex, float2 UV, FGBufferData GBuffe
 	case 1u: // DirectLight: unshadowed lighting contribution plus alpha mask.
 		SourceValue = SceneTexturesStruct.LightingBufferTexture.SampleLevel(GlobalBilinearClampedSampler, UV, 0);
 		break;
-	case 2u: // NativeShadow: temporally stabilized native visibility.
+	case 2u: // NativeShadow: current-frame native visibility.
 		SourceValue = float4(ShadowBufferTexture.SampleLevel(ShadowBufferSampler, UV, 0).rrr, 1.0f);
 		break;
 	case 3u: // ShadowChannel: subtraction mask exported in LightingBuffer alpha.
@@ -112,10 +112,10 @@ float4 EvaluateDeferredToonInput(uint LayerIndex, float2 UV, FGBufferData GBuffe
 	case 8u: // ShadingModel.
 		SourceValue = float4((float)GBufferData.ShadingModelID / 255.0f, 0.0f, 0.0f, 1.0f);
 		break;
-	case 9u: // Linearized depth is decoded from the scene depth RT.
-		SourceValue = SceneTexturesStruct.SceneDepthTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+	case 9u: // Linearized depth from the decoded GBuffer surface position.
+		SourceValue = float4(GBufferData.Depth.xxx, 1.0f);
 		break;
-	case 10u: // Velocity remains available for the next temporal layer pass.
+	case 10u: // Velocity is encoded in the scene-texture uniform.
 		SourceValue = SceneTexturesStruct.GBufferVelocityTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
 		break;
 	default:
@@ -283,6 +283,19 @@ void MainPS(
 	else if (DebugView == 11)
 	{
 		OutColor = float4(saturate(StyleColor), 1.0f);
+	}
+	else if (DebugView == 12)
+	{
+		// [DeferredToon] Display linear depth with a fixed 100 m reference range
+		// so nearby geometry remains readable without changing the semantic value.
+		OutColor = float4(saturate(GBufferData.Depth / 10000.0f).xxx, 1.0f);
+	}
+	else if (DebugView == 13)
+	{
+		// [DeferredToon] Motion vectors are signed; remap them around 0.5 so
+		// forward/backward and left/right motion remain visible in the preview.
+		const float3 EncodedVelocity = SceneTexturesStruct.GBufferVelocityTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).rgb;
+		OutColor = float4(saturate(EncodedVelocity * 0.5f + 0.5f), 1.0f);
 	}
 	else
 	{
