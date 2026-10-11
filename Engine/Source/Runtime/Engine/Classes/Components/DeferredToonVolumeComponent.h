@@ -10,6 +10,16 @@ class UCurveBase;
 class UVolumeTexture;
 class FDeferredToonVolumeSceneProxy;
 
+// [DeferredToon] Explicit output policy keeps the legacy composite as the safe
+// default while allowing a volume to opt into RT-driven color reconstruction.
+UENUM(BlueprintType)
+enum class EDeferredToonVolumeOutputMode : uint8
+{
+    NativeComposite UMETA(DisplayName="Native Composite"),
+    RecomposeDiffuse UMETA(DisplayName="Recompose Diffuse"),
+    Replace UMETA(DisplayName="Replace"),
+};
+
 // [DeferredToon] Asset-facing component for pre-tonemap multi-box color mapping.
 UCLASS(ClassGroup=(Rendering), meta=(BlueprintSpawnableComponent), hidecategories=(Object, Mobility, Activation), MinimalAPI)
 class UDeferredToonVolumeComponent : public USceneComponent
@@ -44,6 +54,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume", meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="1.0"))
     float BlendWeight;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume")
+    EDeferredToonVolumeOutputMode OutputMode;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume", meta=(ClampMin="-2147483648", ClampMax="2147483647"))
     int32 Priority;
 
@@ -60,6 +73,7 @@ public:
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetLightingColorCurve(UCurveLinearColor* NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowColorCurve(UCurveLinearColor* NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetBlendWeight(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOutputMode(EDeferredToonVolumeOutputMode NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetPriority(int32 NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetObjectID(int32 NewValue);
 

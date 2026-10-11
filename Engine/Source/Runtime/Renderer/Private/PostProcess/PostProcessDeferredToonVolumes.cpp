@@ -96,6 +96,7 @@ namespace
 			SHADER_PARAMETER(float, EdgeFalloff)
 			SHADER_PARAMETER(float, ShadowColorVolumeWeight)
 			SHADER_PARAMETER(float, BlendWeight)
+			SHADER_PARAMETER(uint32, OutputMode)
 			SHADER_PARAMETER(float, Priority)
 			SHADER_PARAMETER(uint32, bShadowColorVolumeValid)
 			SHADER_PARAMETER(uint32, DebugView)
@@ -204,6 +205,7 @@ namespace
 		PassParameters->EdgeFalloff = Volume.EdgeFalloff;
 		PassParameters->ShadowColorVolumeWeight = Volume.ShadowColorVolumeWeight;
 		PassParameters->BlendWeight = Volume.BlendWeight;
+		PassParameters->OutputMode = uint32(Volume.OutputMode);
 		PassParameters->Priority = float(Volume.GetPriority());
 		PassParameters->bShadowColorVolumeValid = Volume.bShadowColorVolumeValid ? 1u : 0u;
 		PassParameters->DebugView = DebugView;

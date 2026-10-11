@@ -285,10 +285,37 @@ void MainPS(
 	}
 	else
 	{
-		// [DeferredToon] NativeComposite keeps the legacy output path intact;
-		// semantic layer debug views above never write into this mode.
+		// [DeferredToon] Keep each output policy explicit. NativeComposite is
+		// mode 0 and preserves the original scene-color path byte-for-byte in
+		// behavior; the other modes opt into the staged RT composition.
 		const float3 MappedLighting = SceneColor.rgb * max(LightingColor.rgb, 0.0f);
 		const float3 ShadowedLighting = MappedLighting * lerp(1.0f.xxx, ShadowTint, CombinedShadowValue);
-		OutColor = float4(lerp(SceneColor.rgb, ShadowedLighting, Weight), SceneColor.a);
+		const float3 NativeCompositeColor = lerp(SceneColor.rgb, ShadowedLighting, Weight);
+		// [DeferredToon] RecomposeDiffuse starts from GBuffer base color and the
+		// direct-light RT, then applies the volume's shadow and semantic style.
+		// It intentionally stays behind an explicit mode so existing content is
+		// unaffected while additional RT layers are still being integrated.
+		const float3 RecomposedDiffuseColor = BaseColorInput.rgb
+			* max(LightingBufferSample.rgb, 0.0f)
+			* lerp(1.0f.xxx, ShadowTint, CombinedShadowValue)
+			* max(StyleColor, 0.0f.xxx);
+		const float3 RecomposeOutput = lerp(SceneColor.rgb, RecomposedDiffuseColor, Weight);
+		// [DeferredToon] Replace exposes the authored semantic style directly;
+		// this is useful for validating a profile before adding more operations.
+		const float3 ReplaceOutput = lerp(SceneColor.rgb, StyleColor, Weight);
+		float3 OutputColor;
+		if (OutputMode == 0u)
+		{
+			OutputColor = NativeCompositeColor;
+		}
+		else if (OutputMode == 1u)
+		{
+			OutputColor = RecomposeOutput;
+		}
+		else if (OutputMode == 2u)
+		{
+			OutputColor = ReplaceOutput;
+		}
+		OutColor = float4(OutputColor, SceneColor.a);
 	}
 }

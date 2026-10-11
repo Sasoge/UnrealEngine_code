@@ -16,6 +16,7 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     EdgeFalloff = Component->EdgeFalloff;
     ShadowColorVolumeWeight = Component->ShadowColorVolumeWeight;
     BlendWeight = Component->BlendWeight;
+    OutputMode = static_cast<uint8>(Component->OutputMode);
     Priority = Component->Priority;
     ObjectID = Component->ObjectID;
     StableSortPath = Component->GetPathName();

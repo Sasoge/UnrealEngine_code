@@ -33,6 +33,9 @@ public:
     float EdgeFalloff = 0.25f;
     float ShadowColorVolumeWeight = 0.0f;
     float BlendWeight = 1.0f;
+    // [DeferredToon] Snapshot the enum as POD so the render thread never
+    // retains a UObject/component reference.
+    uint8 OutputMode = 0;
     int32 Priority = 0;
     int32 ObjectID = 0;
     uint32 StableSortKey = 1;
