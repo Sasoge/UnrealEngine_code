@@ -193,7 +193,6 @@ uint64 FPreviousViewInfo::GetGPUSizeBytes(bool bLogSizes) const
 		CompositePrimitiveDepthHistory.GetGPUSizeBytes(bLogSizes) +
 #endif
 		CustomSSRInput.GetGPUSizeBytes(bLogSizes) +
-		DeferredToonShadowBufferHistory.GetGPUSizeBytes(bLogSizes) +
 		ReflectionsHistory.GetGPUSizeBytes(bLogSizes) +
 		WaterReflectionsHistory.GetGPUSizeBytes(bLogSizes) +
 		AmbientOcclusionHistory.GetGPUSizeBytes(bLogSizes) +

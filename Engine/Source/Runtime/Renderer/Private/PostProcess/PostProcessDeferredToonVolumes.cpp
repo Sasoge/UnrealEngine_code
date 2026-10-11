@@ -27,48 +27,6 @@ namespace
 		TEXT("Deferred toon volume debug view: 0 NativeComposite, 1 weight, 2 volume color, 3 priority, 4-11 semantic layers."),
 		ECVF_RenderThreadSafe);
 
-	// [DeferredToon] VSM/SMRT uses View.StateFrameIndex for its blue-noise
-	// sequence. Keep a small history in the custom pre-tonemap path instead of
-	// disabling temporal sampling globally.
-	TAutoConsoleVariable<float> CVarDeferredToonShadowTemporalWeight(
-		TEXT("r.Toon.DeferredVolumes.TemporalWeight"),
-		0.20f,
-		TEXT("Current-frame weight for the deferred toon ShadowBuffer temporal filter."),
-		ECVF_RenderThreadSafe);
-
-	TAutoConsoleVariable<int32> CVarDeferredToonShadowTemporalFilter(
-		TEXT("r.Toon.DeferredVolumes.TemporalFilter"),
-		1,
-		TEXT("Enables temporal filtering of the deferred toon ShadowBuffer."),
-		ECVF_RenderThreadSafe);
-
-	// [DeferredToon] Resolve the temporal ShadowBuffer with a compute pass.  A
-	// fullscreen graphics PSO was rejected by D3D12 for this custom scalar
-	// target on the editor's SM6 path, while the result is naturally a UAV write.
-	class FDeferredToonShadowTemporalCS : public FGlobalShader
-	{
-		DECLARE_GLOBAL_SHADER(FDeferredToonShadowTemporalCS);
-		SHADER_USE_PARAMETER_STRUCT(FDeferredToonShadowTemporalCS, FGlobalShader);
-
-		static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
-		{
-			return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5)
-				&& !IsForwardShadingEnabled(Parameters.Platform);
-		}
-
-		BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-			SHADER_PARAMETER(FIntPoint, ViewRectMin)
-			SHADER_PARAMETER(FIntPoint, ViewRectSize)
-			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, CurrentShadowBuffer)
-			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, PreviousShadowBuffer)
-			SHADER_PARAMETER(float, CurrentFrameWeight)
-			SHADER_PARAMETER(uint32, bHistoryValid)
-			SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, StableShadowBuffer)
-		END_SHADER_PARAMETER_STRUCT()
-	};
-
-	IMPLEMENT_GLOBAL_SHADER(FDeferredToonShadowTemporalCS, "/Engine/Private/PostProcessDeferredToonShadowTemporal.usf", "MainCS", SF_Compute);
-
 	class FDeferredToonVolumePS : public FGlobalShader
 	{
 	public:
@@ -198,9 +156,10 @@ namespace
 		PassParameters->SceneTextures = SceneTextures;
 		PassParameters->SceneColorTexture = Input.Texture;
 		PassParameters->SceneColorSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-		PassParameters->ShadowBufferTexture = View.DeferredToonStableShadowBuffer
-			? View.DeferredToonStableShadowBuffer
-			: (*SceneTextures)->ShadowBufferTexture;
+		// [DeferredToon] Consume the native ShadowBuffer directly.  The custom
+		// history path was removed because it accumulated camera-space pixels
+		// without reprojection and produced severe moving-camera ghosting.
+		PassParameters->ShadowBufferTexture = (*SceneTextures)->ShadowBufferTexture;
 		PassParameters->ShadowBufferSampler = TStaticSamplerState<SF_Point, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 		PassParameters->ShadowColorVolume = Volume.bShadowColorVolumeValid
 			? RegisterExternalTexture(GraphBuilder, Volume.ShadowColorVolumeResource.GetReference(), TEXT("DeferredToonVolume.ShadowColorVolume"))
@@ -235,113 +194,9 @@ namespace
 	}
 }
 
-namespace
-{
-	FRDGTextureRef AddDeferredToonShadowBufferTemporalPassInternal(
-		FRDGBuilder& GraphBuilder,
-		const FViewInfo& View,
-		FRDGTextureRef ShadowBuffer)
-	{
-		if (!ShadowBuffer || !View.ViewState || CVarDeferredToonShadowTemporalFilter.GetValueOnRenderThread() <= 0)
-		{
-			return ShadowBuffer;
-		}
-
-		// [DeferredToon] Reuse the result if both the volume pass and the debug
-		// presentation request it in the same frame.
-		if (View.DeferredToonStableShadowBuffer)
-		{
-			return View.DeferredToonStableShadowBuffer;
-		}
-
-		// [DeferredToon] ViewState::PrevFrameViewInfo is replaced with the current
-		// frame's base view data during PrepareViewStateForVisibility.  The history
-		// that belongs to the previous rendered frame is therefore exposed through
-		// View.PrevViewInfo, while the extraction target for this frame must remain
-		// ViewState::PrevFrameViewInfo.  Reading and writing the same object here
-		// would invalidate the history on every frame and make the temporal pass a
-		// current-frame copy.
-		const FTemporalAAHistory& PreviousHistory = View.PrevViewInfo.DeferredToonShadowBufferHistory;
-		FTemporalAAHistory& OutputHistory = View.ViewState->PrevFrameViewInfo.DeferredToonShadowBufferHistory;
-		const FIntPoint BufferExtent = ShadowBuffer->Desc.Extent;
-		const bool bMatchingHistory = PreviousHistory.IsValid()
-			&& PreviousHistory.ReferenceBufferSize == BufferExtent
-			&& PreviousHistory.ViewportRect == View.ViewRect;
-
-		// Do not blend across camera cuts or transform resets. Temporal jitter only
-		// changes the projection matrix, so a static editor camera keeps its history.
-		const FVector CurrentViewOrigin = View.ViewMatrices.GetViewOrigin();
-		const FVector PreviousViewOrigin = View.PrevViewInfo.ViewMatrices.GetViewOrigin();
-		const FVector CurrentViewDirection = View.ViewMatrices.GetViewMatrix().GetColumn(2);
-		const FVector PreviousViewDirection = View.PrevViewInfo.ViewMatrices.GetViewMatrix().GetColumn(2);
-		const bool bCameraStable = !View.bCameraCut && !View.bPrevTransformsReset
-			&& (CurrentViewOrigin - PreviousViewOrigin).SizeSquared() < FMath::Square(0.5)
-			&& (CurrentViewDirection | PreviousViewDirection) > 0.9999;
-		const bool bHistoryValid = bMatchingHistory && bCameraStable;
-
-		const FRDGTextureRef PreviousShadowBuffer = bHistoryValid
-			? TryRegisterExternalTexture(GraphBuilder, PreviousHistory.RT[0])
-			: GSystemTextures.GetBlackDummy(GraphBuilder);
-
-		const FRDGTextureRef StableShadowBuffer = GraphBuilder.CreateTexture(
-			FRDGTextureDesc::Create2D(
-				BufferExtent,
-				// [DeferredToon] Keep the temporal resolve in a standard RGBA16F
-				// render target.  The source ShadowBuffer is scalar R16F on D3D12,
-				// but using R16F as the fullscreen pass target makes graphics PSO
-				// creation fail with E_INVALIDARG (RTV format 0x57).  Only the red
-				// channel is consumed by the volume shader, so the wider target does
-				// not change the data contract and is suitable for the compute UAV.
-				PF_FloatRGBA,
-				FClearValueBinding::None,
-				TexCreate_ShaderResource | TexCreate_UAV),
-			TEXT("DeferredToon.StableShadowBuffer"));
-		// [DeferredToon] UAV dispatches cover only the primary view rect.  TSR
-		// can enlarge the texture or use a non-zero view origin, so initialize
-		// the complete allocation first and never expose pooled pixels outside
-		// the written rect as rectangular history artifacts.
-		AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(StableShadowBuffer), FLinearColor::Black);
-
-		FDeferredToonShadowTemporalCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FDeferredToonShadowTemporalCS::FParameters>();
-		PassParameters->ViewRectMin = View.ViewRect.Min;
-		PassParameters->ViewRectSize = View.ViewRect.Size();
-		PassParameters->CurrentShadowBuffer = ShadowBuffer;
-		PassParameters->PreviousShadowBuffer = PreviousShadowBuffer;
-		PassParameters->CurrentFrameWeight = FMath::Clamp(CVarDeferredToonShadowTemporalWeight.GetValueOnRenderThread(), 0.0f, 1.0f);
-		PassParameters->bHistoryValid = bHistoryValid ? 1u : 0u;
-		PassParameters->StableShadowBuffer = GraphBuilder.CreateUAV(StableShadowBuffer);
-
-		TShaderMapRef<FDeferredToonShadowTemporalCS> ComputeShader(View.ShaderMap);
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
-			RDG_EVENT_NAME("DeferredToon ShadowBuffer Temporal"),
-			ComputeShader,
-			PassParameters,
-			FComputeShaderUtils::GetGroupCount(View.ViewRect.Size(), 8));
-
-		if (!View.bStatePrevViewInfoIsReadOnly)
-		{
-			GraphBuilder.QueueTextureExtraction(StableShadowBuffer, &OutputHistory.RT[0]);
-			OutputHistory.ReferenceBufferSize = BufferExtent;
-			OutputHistory.ViewportRect = View.ViewRect;
-		}
-
-		View.DeferredToonStableShadowBuffer = StableShadowBuffer;
-		return StableShadowBuffer;
-	}
-}
-
 int32 GetDeferredToonVolumeDebugView()
 {
 	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 11);
-}
-
-FRDGTextureRef AddDeferredToonShadowBufferTemporalPass(
-	FRDGBuilder& GraphBuilder,
-	const FViewInfo& View,
-	FRDGTextureRef ShadowBuffer)
-{
-	return AddDeferredToonShadowBufferTemporalPassInternal(GraphBuilder, View, ShadowBuffer);
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(
@@ -354,10 +209,6 @@ FScreenPassTextureSlice AddDeferredToonVolumePass(
 	{
 		return Inputs.SceneColor;
 	}
-
-	// [DeferredToon] Stabilize the native shadow scalar once per view so every
-	// volume samples the same filtered buffer.
-	AddDeferredToonShadowBufferTemporalPass(GraphBuilder, View, (*Inputs.SceneTextures)->ShadowBufferTexture);
 
 	TArray<FDeferredToonVolumeSceneProxy*> Volumes;
 	Scene->CollectDeferredToonVolumes(FBox(EForceInit::ForceInit), Volumes);

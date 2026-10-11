@@ -1050,11 +1050,6 @@ struct FPreviousViewInfo
 	// input post process material.
 	FTemporalAAHistory CustomSSRInput;
 
-	// [DeferredToon] Temporal accumulation for the pre-tonemap ShadowBuffer.
-	// The native VSM/SMRT mask is intentionally sampled before TAA/TSR, so its
-	// frame-indexed blue-noise sequence is otherwise visible in toon volumes.
-	FTemporalAAHistory DeferredToonShadowBufferHistory;
-
 	// History for the reflections
 	FScreenSpaceDenoiserHistory ReflectionsHistory;
 	FScreenSpaceDenoiserHistory WaterReflectionsHistory;
@@ -1432,11 +1427,6 @@ public:
 	// Furthest and closest Hierarchical Z Buffer
 	FRDGTextureRef HZB = nullptr;
 	FRDGTextureRef ClosestHZB = nullptr;
-
-	// [DeferredToon] Current-frame temporally stabilized ShadowBuffer.  This is
-	// mutable because post-processing receives FViewInfo as a const reference;
-	// the texture is an RDG lifetime handle and is reset with each view.
-	mutable FRDGTextureRef DeferredToonStableShadowBuffer = nullptr;
 
 	struct FTranslucencyVolumeMarkData
 	{

@@ -414,7 +414,7 @@ FScreenPassTexture AddLightingShadowBufferDebugPass(
 	// texture here so the debug pass follows the same SceneTextureId contract.
 	const FRDGTextureRef DebugTexture = DebugView == 1
 		? (*SceneTextures)->LightingBufferTexture
-		: AddDeferredToonShadowBufferTemporalPass(GraphBuilder, View, (*SceneTextures)->ShadowBufferTexture);
+		: (*SceneTextures)->ShadowBufferTexture;
 	if (!DebugTexture)
 	{
 		return SceneColor;

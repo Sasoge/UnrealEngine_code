@@ -20,14 +20,6 @@ struct FDeferredToonVolumePassInputs
 // at the final view-family resolution, matching UE's buffer visualization path.
 RENDERER_API int32 GetDeferredToonVolumeDebugView();
 
-// [DeferredToon] Smooth the pre-tonemap native ShadowBuffer with a small
-// per-view history.  The returned texture is also cached on the current view
-// so the debug presentation and all volume passes consume the same result.
-RENDERER_API FRDGTextureRef AddDeferredToonShadowBufferTemporalPass(
-	FRDGBuilder& GraphBuilder,
-	const FViewInfo& View,
-	FRDGTextureRef ShadowBuffer);
-
 FScreenPassTextureSlice AddDeferredToonVolumePass(
 	FRDGBuilder& GraphBuilder,
 	const FViewInfo& View,
