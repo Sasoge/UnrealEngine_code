@@ -50,9 +50,11 @@ namespace LightingShadowBufferMRT
 		SceneColor = 0,
 		LightingBuffer = 1,
 		ShadowBuffer = 2,
-		ToonShadow = 3,
-		SubstrateOpaque = 4,
-		SubstrateSubSurface = 5
+		// [DeferredToon] Keep diffuse/specular direct lighting in separate MRTs.
+		SpecularBuffer = 3,
+		ToonShadow = 4,
+		SubstrateOpaque = 5,
+		SubstrateSubSurface = 6
 	};
 }
 

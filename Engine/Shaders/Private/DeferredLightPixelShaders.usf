@@ -278,20 +278,22 @@ void DeferredLightPixelMain(
 	out float4 OutColor		: SV_Target0
 	//////////////////custom//////////////
 #if LIGHTING_SHADOW_BUFFER_OUTPUT
-	// [LightingShadowBuffer] Feature-on layout reserves Target1/2 for the
+	// [LightingShadowBuffer] Feature-on layout reserves Target1/2/3 for the
 	// accumulation buffers. Toon/Substrate outputs follow without collisions.
 	, out float4 LightingContribution : SV_Target1
 	, out float ShadowContribution : SV_Target2
+	// [DeferredToon] Keep direct specular independent from diffuse lighting.
+	, out float4 SpecularContribution : SV_Target3
 #if IS_TOON_MAINLIGHT
-	, out float4 ToonShadow	: SV_Target3
+	, out float4 ToonShadow	: SV_Target4
 #if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
-	, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target4
-	, out float3 OutSubSurfaceSceneColor : SV_Target5
+	, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target5
+	, out float3 OutSubSurfaceSceneColor : SV_Target6
 #endif
 #else
 #if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
-, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target3
-, out float3 OutSubSurfaceSceneColor : SV_Target4
+, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target4
+, out float3 OutSubSurfaceSceneColor : SV_Target5
 #endif
 #endif
 #else
@@ -321,6 +323,7 @@ void DeferredLightPixelMain(
 	// accumulation target, so this pass starts its pixel contribution at zero.
 	LightingContribution = 0;
 	ShadowContribution = 0;
+	SpecularContribution = 0;
 #endif
 #if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
 	OutOpaqueRoughRefractionSceneColor = 0;
@@ -440,7 +443,9 @@ void DeferredLightPixelMain(
 			{
 				// [LightingShadowBuffer] Reserve LightingBuffer alpha for the
 				// Shadow Channel mask; direct lighting only occupies RGB.
-				LightingContribution += float4(LightingBufferSubstrateLighting.SceneColor.rgb, 0.0f);
+				// [DeferredToon] Substrate already exposes diffuse/specular split totals.
+				LightingContribution += float4(LightingBufferSubstrateLighting.TotalDiffuseLighting, 0.0f);
+				SpecularContribution += float4(LightingBufferSubstrateLighting.TotalSpecularLighting, 0.0f);
 			}
 
 			// [LightingShadowBuffer] Keep native UE occlusion and Shadow Channel
@@ -648,7 +653,9 @@ void DeferredLightPixelMain(
 		LightingBufferLightData.ContactShadowCastingIntensity = 0.0f;
 		LightingBufferLightData.ContactShadowNonCastingIntensity = 0.0f;
 		float UnshadowedSurfaceShadow = 1.0f;
-		const float4 UnshadowedRadiance = GetDynamicLighting(
+		// [DeferredToon] Use UE's split accumulator so roughness-dependent specular
+		// response cannot leak into the direct diffuse mask.
+		const FDeferredLightingSplit UnshadowedLighting = GetDynamicLightingSplit(
 			DerivedParams.TranslatedWorldPosition,
 			DerivedParams.CameraVector,
 			LightingBufferGBuffer,
@@ -661,7 +668,8 @@ void DeferredLightPixelMain(
 		if (bLightingChannelMatch)
 		{
 			// [LightingShadowBuffer] Reserve alpha for the Shadow Channel mask.
-			LightingContribution += float4(UnshadowedRadiance.rgb, 0.0f);
+			LightingContribution += float4(UnshadowedLighting.DiffuseLighting.rgb, 0.0f);
+			SpecularContribution += float4(UnshadowedLighting.SpecularLighting.rgb, 0.0f);
 		}
 
 		// [LightingShadowBuffer] Keep native UE occlusion in ShadowBuffer and the
@@ -782,10 +790,13 @@ void DeferredLightPixelMain(
 	// HDR space. Alpha is a dimensionless Shadow Channel mask and must not be
 	// scaled by exposure; ShadowBuffer remains a scalar occlusion contribution.
 	LightingContribution.rgb *= GetExposure();
+	// [DeferredToon] SpecularContribution is pre-exposed in its own MRT.
+	SpecularContribution.rgb *= GetExposure();
 	if (bWriteLightingShadowBuffers == 0)
 	{
 		LightingContribution = 0;
 		ShadowContribution = 0;
+		SpecularContribution = 0;
 	}
 #endif
 #if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED 
@@ -980,7 +991,8 @@ void DeferredLightPixelMain(
 	LightingBufferHairLightData.ContactShadowCastingIntensity = 0.0f;
 	LightingBufferHairLightData.ContactShadowNonCastingIntensity = 0.0f;
 	float UnshadowedHairSurfaceShadow = 1.0f;
-	const float4 UnshadowedHairRadiance = GetDynamicLighting(
+	// [DeferredToon] Hair lighting follows the same diffuse/specular split.
+	const FDeferredLightingSplit UnshadowedHairLighting = GetDynamicLightingSplit(
 		TranslatedWorldPosition,
 		CameraVector,
 		LightingBufferHairGBuffer,
@@ -1005,7 +1017,8 @@ void DeferredLightPixelMain(
 	// [LightingShadowBuffer] Hair direct lighting keeps atmospheric/profile and
 	// coverage response; occlusion remains positive and range-limited.
 	const float HairLightingScale = Attenuation * LocalCoverage;
-	LightingContribution = float4(AtmosphericTransmittance * UnshadowedHairRadiance.xyz * HairLightingScale * GetExposure(), 0.0f);
+	LightingContribution = float4(AtmosphericTransmittance * UnshadowedHairLighting.DiffuseLighting.rgb * HairLightingScale * GetExposure(), 0.0f);
+	SpecularContribution = float4(AtmosphericTransmittance * UnshadowedHairLighting.SpecularLighting.rgb * HairLightingScale * GetExposure(), 0.0f);
 	// [LightingShadowBuffer] Match the standard shadow-only weighting while
 	// keeping ordinary hair shadow contributions at weight one.
 	const float HairShadowReceiverFilter = bHairShadowChannelOnly ? (bHairShadowReceiverChannelMatch ? 1.0f : 0.0f) : 1.0f;
