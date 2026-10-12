@@ -10,6 +10,9 @@ Texture2D SceneColorTexture;
 SamplerState SceneColorSampler;
 Texture2D ShadowBufferTexture;
 SamplerState ShadowBufferSampler;
+// [DeferredToon] Separate direct-specular input; DirectLight remains diffuse-only.
+Texture2D SpecularBufferTexture;
+SamplerState SpecularBufferSampler;
 Texture3D ShadowColorVolume;
 SamplerState ShadowColorVolumeSampler;
 
@@ -120,6 +123,9 @@ float4 EvaluateDeferredToonInput(uint LayerIndex, float2 UV, FGBufferData GBuffe
 	case 10u: // Velocity is encoded in the scene-texture uniform.
 		SourceValue = SceneTexturesStruct.GBufferVelocityTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
 		break;
+	case 11u: // SpecularDirectLight: unshadowed direct specular contribution.
+		SourceValue = SpecularBufferTexture.SampleLevel(SpecularBufferSampler, UV, 0);
+		break;
 	default:
 		return InputDefaults[LayerIndex];
 	}
@@ -197,12 +203,13 @@ void MainPS(
 	const float4 WorldNormalInput = EvaluateDeferredToonInput(5u, UV, GBufferData);
 	const float4 RoughnessInput = EvaluateDeferredToonInput(6u, UV, GBufferData);
 	const float4 ShadingModelInput = EvaluateDeferredToonInput(7u, UV, GBufferData);
+	const float4 SpecularDirectLightInput = EvaluateDeferredToonInput(10u, UV, GBufferData);
 	float3 StyleColor;
 	float StyleMask;
 	ComposeDeferredToonStyleLayers(UV, GBufferData, StyleColor, StyleMask);
 	// Keep the named values live in this first-stage pass so shader compilers do
 	// not remove the contract before later layer composition is added.
-	const float SemanticInputKeepAlive = DirectLightInput.a + AmbientOcclusionInput.a + BaseColorInput.a + WorldNormalInput.a + RoughnessInput.a + ShadingModelInput.a;
+	const float SemanticInputKeepAlive = DirectLightInput.a + AmbientOcclusionInput.a + BaseColorInput.a + WorldNormalInput.a + RoughnessInput.a + ShadingModelInput.a + SpecularDirectLightInput.a;
 	const float3 NormalizedPosition = LocalPosition / max(LocalBoxExtent * 2.0f, 1e-3f) + 0.5f;
 	const float3 DistanceToEdge = min(NormalizedPosition, 1.0f - NormalizedPosition);
 	const float EdgeDistance = min(DistanceToEdge.x, min(DistanceToEdge.y, DistanceToEdge.z));
@@ -326,6 +333,12 @@ void MainPS(
 	{
 		// [DeferredToon] Union of the native and channel shadow masks.
 		OutColor = float4(CombinedShadowMask.xxx, 1.0f);
+	}
+	else if (DebugView == 18)
+	{
+		// [DeferredToon] Direct specular contribution is visible independently
+		// so roughness/highlight energy cannot contaminate DirectLight debug.
+		OutColor = float4(max(SpecularDirectLightInput.rgb, 0.0f), 1.0f);
 	}
 	else
 	{

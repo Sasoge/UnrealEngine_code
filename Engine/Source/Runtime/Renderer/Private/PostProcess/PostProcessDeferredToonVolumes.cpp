@@ -24,7 +24,7 @@ namespace
 	TAutoConsoleVariable<int32> CVarDeferredToonVolumesDebugView(
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
-		TEXT("Deferred toon volume debug view: 0 NativeComposite, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-17 independent masks."),
+		TEXT("Deferred toon volume debug view: 0 NativeComposite, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-18 independent lighting/shadow masks."),
 		ECVF_RenderThreadSafe);
 
 	class FDeferredToonVolumePS : public FGlobalShader
@@ -47,6 +47,9 @@ namespace
 			SHADER_PARAMETER_SAMPLER(SamplerState, SceneColorSampler)
 			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, ShadowBufferTexture)
 			SHADER_PARAMETER_SAMPLER(SamplerState, ShadowBufferSampler)
+			// [DeferredToon] Explicit binding for the split direct-specular semantic.
+			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SpecularBufferTexture)
+			SHADER_PARAMETER_SAMPLER(SamplerState, SpecularBufferSampler)
 			SHADER_PARAMETER_RDG_TEXTURE(Texture3D, ShadowColorVolume)
 			SHADER_PARAMETER_SAMPLER(SamplerState, ShadowColorVolumeSampler)
 			SHADER_PARAMETER(FMatrix44f, WorldToLocal)
@@ -99,6 +102,8 @@ namespace
 			EDeferredToonInputId::ShadingModel,
 			EDeferredToonInputId::Depth,
 			EDeferredToonInputId::Velocity,
+			EDeferredToonInputId::SpecularDirectLight,
+			EDeferredToonInputId::Unknown,
 		};
 
 		// [DeferredToon] Both authoring paths feed the same fixed renderer ABI:
@@ -134,7 +139,7 @@ namespace
 		// control.  255 preserves the legacy global console variable path.
 		const uint32 DebugView = Volume.DebugView == 255u
 			? uint32(GetDeferredToonVolumeDebugView())
-			: FMath::Min<uint32>(Volume.DebugView, 17u);
+			: FMath::Min<uint32>(Volume.DebugView, 18u);
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial
@@ -167,6 +172,8 @@ namespace
 		// without reprojection and produced severe moving-camera ghosting.
 		PassParameters->ShadowBufferTexture = (*SceneTextures)->ShadowBufferTexture;
 		PassParameters->ShadowBufferSampler = TStaticSamplerState<SF_Point, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+		PassParameters->SpecularBufferTexture = (*SceneTextures)->SpecularBufferTexture;
+		PassParameters->SpecularBufferSampler = TStaticSamplerState<SF_Point, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 		PassParameters->ShadowColorVolume = Volume.bShadowColorVolumeValid
 			? RegisterExternalTexture(GraphBuilder, Volume.ShadowColorVolumeResource.GetReference(), TEXT("DeferredToonVolume.ShadowColorVolume"))
 			: GBlackVolumeTexture->TextureRHI.IsValid()
@@ -205,7 +212,7 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 17);
+	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 18);
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(

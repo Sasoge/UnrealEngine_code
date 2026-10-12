@@ -19,6 +19,8 @@ enum class EDeferredToonInputId : uint16
 	ShadingModel = 8,
 	Depth = 9,
 	Velocity = 10,
+	// [DeferredToon] Unshadowed direct specular contribution from the split MRT.
+	SpecularDirectLight = 11,
 
 	// [DeferredToon] Retain retired IDs so old assets can resolve to a
 	// documented fallback instead of silently changing their meaning.
@@ -30,6 +32,8 @@ enum class EDeferredToonInputSource : uint8
 	None = 0,
 	LightingBuffer,
 	ShadowBuffer,
+	// [DeferredToon] Separate provider keeps roughness-dependent highlights out of DirectLight.
+	SpecularBuffer,
 	SceneTextures,
 	GBuffer,
 };

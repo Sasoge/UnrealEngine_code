@@ -10,7 +10,7 @@ namespace DeferredToonInputRegistryPrivate
 		static TArray<FDeferredToonInputDescriptor> Descriptors = []
 		{
 			TArray<FDeferredToonInputDescriptor> Result;
-			Result.Reserve(11);
+			Result.Reserve(12);
 
 			auto Add = [&Result](
 				EDeferredToonInputId Id,
@@ -51,6 +51,9 @@ namespace DeferredToonInputRegistryPrivate
 			// fallback when motion vectors are disabled), so the semantic remains
 			// selectable without a shader permutation or a special asset case.
 			Add(EDeferredToonInputId::Velocity, TEXT("Velocity"), EDeferredToonInputSource::SceneTextures, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Encoded, FVector4f(0.0f, 0.0f, 0.0f, 1.0f), true);
+			// [DeferredToon] Keep specular as a separate semantic input so DirectLight
+			// remains a diffuse mask independent of material roughness.
+			Add(EDeferredToonInputId::SpecularDirectLight, TEXT("SpecularDirectLight"), EDeferredToonInputSource::SpecularBuffer, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0.0f, 0.0f, 0.0f, 1.0f), true);
 			Add(EDeferredToonInputId::DeprecatedShadowBuffer, TEXT("DeprecatedShadowBuffer"), EDeferredToonInputSource::ShadowBuffer, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Linear, FVector4f(1.0f, 1.0f, 1.0f, 1.0f), false, true, EDeferredToonInputId::NativeShadow);
 			return Result;
 		}();
