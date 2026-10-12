@@ -17,11 +17,8 @@ float4x4 WorldToLocal;
 float3 LocalBoxExtent;
 float EdgeFalloff;
 float ShadowColorVolumeWeight;
-float3 DirectLightColor;
-float DirectLightIntensity;
-float DirectLightThreshold;
-float DirectLightSoftness;
-float3 DirectShadowColor;
+float DirectLightMaskThreshold;
+float DirectLightMaskSoftness;
 float BlendWeight;
 uint OutputMode;
 float Priority;
@@ -220,41 +217,35 @@ void MainPS(
 	const float Weight = saturate(BoxWeight * FalloffWeight * BlendWeight) * SurfaceMask;
 
 	const float4 LightingBufferSample = DirectLightInput;
-	const float LightingValue = dot(LightingBufferSample.rgb, float3(0.2126f, 0.7152f, 0.0722f));
+	const float LightingValue = dot(max(LightingBufferSample.rgb, 0.0f), float3(0.2126f, 0.7152f, 0.0722f));
 	// [DeferredToon] Native UE occlusion and Shadow Channel subtraction are
 	// exported separately. Both masks use this same box weight, then form a
 	// union so overlapping masks do not apply the tint twice.
 	// [DeferredToon] Use the current-frame native scalar supplied by the
 	// ShadowBuffer semantic. LightingBuffer remains the native accumulation.
-	const float NativeShadowValue = saturate(NativeShadowInput.r);
+	const float NativeShadowMask = saturate(NativeShadowInput.r);
 	// LightingBufferSample.a is now resolved through the ShadowChannel semantic;
 	// retaining this source name documents the channel contract for legacy users.
-	const float ShadowChannelValue = saturate(ShadowChannelInput.r);
-	const float NativeShadowContribution = NativeShadowValue;
-	const float ShadowChannelContribution = ShadowChannelValue * (1.0f - NativeShadowValue);
-	const float CombinedShadowValue = saturate(NativeShadowContribution + ShadowChannelContribution);
+	const float ShadowChannelMask = saturate(ShadowChannelInput.r);
+	const float NativeShadowContribution = NativeShadowMask;
+	const float ShadowChannelContribution = ShadowChannelMask * (1.0f - NativeShadowMask);
+	const float CombinedShadowMask = saturate(NativeShadowContribution + ShadowChannelContribution);
 	const float4 LightingColor = SampleColorCurve(saturate(LightingValue), LightingColorSamples);
-	const float4 NativeShadowCurveColor = SampleColorCurve(NativeShadowValue, ShadowColorSamples);
-	const float4 ShadowChannelCurveColor = SampleColorCurve(ShadowChannelValue, ShadowColorSamples);
+	const float4 NativeShadowCurveColor = SampleColorCurve(NativeShadowMask, ShadowColorSamples);
+	const float4 ShadowChannelCurveColor = SampleColorCurve(ShadowChannelMask, ShadowColorSamples);
 	const float4 VolumeColor = bShadowColorVolumeValid != 0 ? Texture3DSampleLevel(ShadowColorVolume, ShadowColorVolumeSampler, saturate(NormalizedPosition), 0) : ShadowChannelCurveColor;
 	const float3 ShadowChannelTint = lerp(ShadowChannelCurveColor.rgb, VolumeColor.rgb, saturate(ShadowColorVolumeWeight));
-	const float3 ShadowTint = CombinedShadowValue > 1e-4f
-		? (NativeShadowCurveColor.rgb * NativeShadowContribution + ShadowChannelTint * ShadowChannelContribution) / CombinedShadowValue
+	const float3 ShadowTint = CombinedShadowMask > 1e-4f
+		? (NativeShadowCurveColor.rgb * NativeShadowContribution + ShadowChannelTint * ShadowChannelContribution) / CombinedShadowMask
 		: 1.0f.xxx;
-	// [DeferredToon] DirectLight is split into a lit band and a shadow band
-	// before native occlusion is applied. This makes the region boundary an
-	// authored, stable control instead of relying on a material-side branch.
-	const float DirectLightLuma = saturate(dot(max(LightingBufferSample.rgb, 0.0f), float3(0.2126f, 0.7152f, 0.0722f)));
-	const float DirectLightBandWidth = max(DirectLightSoftness, 1e-4f);
-	const float DirectLightLitMask = smoothstep(
-		saturate(DirectLightThreshold - DirectLightBandWidth),
-		saturate(DirectLightThreshold + DirectLightBandWidth),
-		DirectLightLuma);
-	const float3 LitDirectLightColor = max(LightingBufferSample.rgb, 0.0f)
-		* max(LightingColor.rgb, 0.0f)
-		* max(DirectLightColor, 0.0f.xxx)
-		* max(DirectLightIntensity, 0.0f);
-	const float3 DirectLightBandColor = lerp(max(DirectShadowColor, 0.0f.xxx), LitDirectLightColor, DirectLightLitMask);
+	// [DeferredToon] Keep the masks independent. DirectLightMask describes
+	// illumination strength; NativeShadowMask and ShadowChannelMask describe
+	// occlusion sources. Style texture mapping consumes them in a later stage.
+	const float DirectLightMaskWidth = max(DirectLightMaskSoftness, 1e-4f);
+	const float DirectLightMask = smoothstep(
+		saturate(DirectLightMaskThreshold - DirectLightMaskWidth),
+		saturate(DirectLightMaskThreshold + DirectLightMaskWidth),
+		LightingValue);
 
 	if (DebugView == 1)
 	{
@@ -265,7 +256,7 @@ void MainPS(
 		// [DeferredToon] Show the actual affected region.  Displaying the raw
 		// curve color made a white curve look like a full-screen pass even when
 		// the volume did not cover the pixel.
-		OutColor = float4(ShadowTint * CombinedShadowValue * Weight, 1.0f);
+		OutColor = float4(ShadowTint * CombinedShadowMask * Weight, 1.0f);
 	}
 	else if (DebugView == 3)
 	{
@@ -316,21 +307,41 @@ void MainPS(
 		const float3 EncodedVelocity = SceneTexturesStruct.GBufferVelocityTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).rgb;
 		OutColor = float4(saturate(EncodedVelocity * 0.5f + 0.5f), 1.0f);
 	}
+	else if (DebugView == 14)
+	{
+		// [DeferredToon] DirectLight illumination mask before style mapping.
+		OutColor = float4(DirectLightMask.xxx, 1.0f);
+	}
+	else if (DebugView == 15)
+	{
+		// [DeferredToon] Native UE occlusion mask from ShadowBuffer.
+		OutColor = float4(NativeShadowMask.xxx, 1.0f);
+	}
+	else if (DebugView == 16)
+	{
+		// [DeferredToon] Shadow Channel subtraction mask.
+		OutColor = float4(ShadowChannelMask.xxx, 1.0f);
+	}
+	else if (DebugView == 17)
+	{
+		// [DeferredToon] Union of the native and channel shadow masks.
+		OutColor = float4(CombinedShadowMask.xxx, 1.0f);
+	}
 	else
 	{
 		// [DeferredToon] Keep each output policy explicit. NativeComposite is
 		// mode 0 and preserves the original scene-color path byte-for-byte in
 		// behavior; the other modes opt into the staged RT composition.
 		const float3 MappedLighting = SceneColor.rgb * max(LightingColor.rgb, 0.0f);
-		const float3 ShadowedLighting = MappedLighting * lerp(1.0f.xxx, ShadowTint, CombinedShadowValue);
+		const float3 ShadowedLighting = MappedLighting * lerp(1.0f.xxx, ShadowTint, CombinedShadowMask);
 		const float3 NativeCompositeColor = lerp(SceneColor.rgb, ShadowedLighting, Weight);
 		// [DeferredToon] RecomposeDiffuse starts from GBuffer base color and the
 		// direct-light RT, then applies the volume's shadow and semantic style.
 		// It intentionally stays behind an explicit mode so existing content is
 		// unaffected while additional RT layers are still being integrated.
 		const float3 RecomposedDiffuseColor = BaseColorInput.rgb
-			* DirectLightBandColor
-			* lerp(1.0f.xxx, ShadowTint, CombinedShadowValue)
+			* max(LightingBufferSample.rgb, 0.0f)
+			* lerp(1.0f.xxx, ShadowTint, CombinedShadowMask)
 			* max(StyleColor, 0.0f.xxx);
 		const float3 RecomposeOutput = lerp(SceneColor.rgb, RecomposedDiffuseColor, Weight);
 		// [DeferredToon] Replace exposes the authored semantic style directly;

@@ -41,6 +41,10 @@ enum class EDeferredToonDebugView : uint8
     StyleColor = 11 UMETA(DisplayName="11 - Style Color"),
     Depth = 12 UMETA(DisplayName="12 - Linear Depth"),
     Velocity = 13 UMETA(DisplayName="13 - Velocity"),
+    DirectLightMask = 14 UMETA(DisplayName="14 - Direct Light Mask"),
+    NativeShadowMask = 15 UMETA(DisplayName="15 - Native Shadow Mask"),
+    ShadowChannelMask = 16 UMETA(DisplayName="16 - Shadow Channel Mask"),
+    CombinedShadowMask = 17 UMETA(DisplayName="17 - Combined Shadow Mask"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 
@@ -75,23 +79,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume")
     TObjectPtr<UCurveLinearColor> ShadowColorCurve;
 
-    // [DeferredToon] Direct-light controls are kept as explicit scalar/color
-    // inputs so a volume can author the lit band without replacing the
-    // existing curve-based style controls.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Direct Light")
-    FLinearColor DirectLightColor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Direct Light", meta=(ClampMin="0.0", ClampMax="16.0", UIMin="0.0", UIMax="4.0"))
-    float DirectLightIntensity;
-
+    // [DeferredToon] DirectLight controls only define the first independent
+    // mask. Style colors and texture mapping are intentionally deferred until
+    // the mask contract is finalized.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Direct Light", meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="1.0"))
-    float DirectLightThreshold;
+    float DirectLightMaskThreshold;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Direct Light", meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="0.25"))
-    float DirectLightSoftness;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Direct Light")
-    FLinearColor DirectShadowColor;
+    float DirectLightMaskSoftness;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume", meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="1.0"))
     float BlendWeight;
@@ -129,11 +124,8 @@ public:
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowColorVolumeWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetLightingColorCurve(UCurveLinearColor* NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowColorCurve(UCurveLinearColor* NewValue);
-    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectLightColor(FLinearColor NewValue);
-    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectLightIntensity(float NewValue);
-    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectLightThreshold(float NewValue);
-    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectLightSoftness(float NewValue);
-    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectShadowColor(FLinearColor NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectLightMaskThreshold(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectLightMaskSoftness(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetBlendWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOutputMode(EDeferredToonVolumeOutputMode NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDebugView(EDeferredToonDebugView NewValue);

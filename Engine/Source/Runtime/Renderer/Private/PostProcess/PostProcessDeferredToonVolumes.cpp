@@ -24,7 +24,7 @@ namespace
 	TAutoConsoleVariable<int32> CVarDeferredToonVolumesDebugView(
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
-		TEXT("Deferred toon volume debug view: 0 NativeComposite, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers."),
+		TEXT("Deferred toon volume debug view: 0 NativeComposite, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-17 independent masks."),
 		ECVF_RenderThreadSafe);
 
 	class FDeferredToonVolumePS : public FGlobalShader
@@ -53,12 +53,10 @@ namespace
 			SHADER_PARAMETER(FVector3f, LocalBoxExtent)
 			SHADER_PARAMETER(float, EdgeFalloff)
 			SHADER_PARAMETER(float, ShadowColorVolumeWeight)
-			// [DeferredToon] DirectLight controls drive the authored lit/shadow band.
-			SHADER_PARAMETER(FVector3f, DirectLightColor)
-			SHADER_PARAMETER(float, DirectLightIntensity)
-			SHADER_PARAMETER(float, DirectLightThreshold)
-			SHADER_PARAMETER(float, DirectLightSoftness)
-			SHADER_PARAMETER(FVector3f, DirectShadowColor)
+			// [DeferredToon] DirectLight mask controls are separate from future
+			// style texture/color parameters.
+			SHADER_PARAMETER(float, DirectLightMaskThreshold)
+			SHADER_PARAMETER(float, DirectLightMaskSoftness)
 			SHADER_PARAMETER(float, BlendWeight)
 			SHADER_PARAMETER(uint32, OutputMode)
 			SHADER_PARAMETER(float, Priority)
@@ -136,7 +134,7 @@ namespace
 		// control.  255 preserves the legacy global console variable path.
 		const uint32 DebugView = Volume.DebugView == 255u
 			? uint32(GetDeferredToonVolumeDebugView())
-			: FMath::Min<uint32>(Volume.DebugView, 13u);
+			: FMath::Min<uint32>(Volume.DebugView, 17u);
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial
@@ -179,12 +177,9 @@ namespace
 		PassParameters->LocalBoxExtent = FVector3f(Volume.LocalBoxExtent);
 		PassParameters->EdgeFalloff = Volume.EdgeFalloff;
 		PassParameters->ShadowColorVolumeWeight = Volume.ShadowColorVolumeWeight;
-		// [DeferredToon] Bind the component's DirectLight band controls per volume.
-		PassParameters->DirectLightColor = FVector3f(Volume.DirectLightColor.R, Volume.DirectLightColor.G, Volume.DirectLightColor.B);
-		PassParameters->DirectLightIntensity = Volume.DirectLightIntensity;
-		PassParameters->DirectLightThreshold = Volume.DirectLightThreshold;
-		PassParameters->DirectLightSoftness = Volume.DirectLightSoftness;
-		PassParameters->DirectShadowColor = FVector3f(Volume.DirectShadowColor.R, Volume.DirectShadowColor.G, Volume.DirectShadowColor.B);
+		// [DeferredToon] Bind only the independent DirectLight mask controls.
+		PassParameters->DirectLightMaskThreshold = Volume.DirectLightMaskThreshold;
+		PassParameters->DirectLightMaskSoftness = Volume.DirectLightMaskSoftness;
 		PassParameters->BlendWeight = Volume.BlendWeight;
 		PassParameters->OutputMode = uint32(Volume.OutputMode);
 		PassParameters->Priority = float(Volume.GetPriority());
@@ -210,7 +205,7 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 13);
+	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 17);
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(
