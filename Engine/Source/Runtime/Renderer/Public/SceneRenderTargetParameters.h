@@ -25,6 +25,8 @@ enum class ESceneTexture
 	// [LightingShadowBuffer] Deferred-only separated direct-light and shadow contributions.
 	LightingBuffer,
 	ShadowBuffer,
+	// [DeferredToon] Separate unshadowed direct specular contribution.
+	SpecularBuffer,
 };
 
 RENDERER_API FRDGTextureRef GetSceneTexture(const FSceneTextures& SceneTextures, ESceneTexture InSceneTexture);
@@ -56,9 +58,11 @@ enum class ESceneTextureSetupMode : uint32
 	// [LightingShadowBuffer] Keep these flags separate so callers can request either buffer independently.
 	LightingBuffer	= 1 << 16,
 	ShadowBuffer		= 1 << 17,
+	// [DeferredToon] Keep specular independently requestable for future input pruning.
+	SpecularBuffer	= 1 << 18,
 	GBuffers		= GBufferA | GBufferB | GBufferC | GBufferD | GBufferE | GBufferF,
 	TBuffers		= TBufferA | TBufferB | TBufferC,
-	All				= SceneColor | SceneDepth | SceneVelocity | GBuffers | SSAO | CustomDepth | TBuffers | ToonShadow | ToonActor | LightingBuffer | ShadowBuffer
+	All				= SceneColor | SceneDepth | SceneVelocity | GBuffers | SSAO | CustomDepth | TBuffers | ToonShadow | ToonActor | LightingBuffer | ShadowBuffer | SpecularBuffer
 	///////////////////////////end///////////////////////////
 };
 ENUM_CLASS_FLAGS(ESceneTextureSetupMode);

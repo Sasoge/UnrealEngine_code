@@ -39,6 +39,8 @@ BEGIN_GLOBAL_SHADER_PARAMETER_STRUCT(FSceneTextureUniformParameters, ENGINE_API)
 	// [LightingShadowBuffer] Scene texture inputs; black fallbacks are supplied when the feature is disabled.
 	SHADER_PARAMETER_RDG_TEXTURE(Texture2D, LightingBufferTexture)
 	SHADER_PARAMETER_RDG_TEXTURE(Texture2D, ShadowBufferTexture)
+	// [DeferredToon] Unshadowed direct specular contribution kept separate from diffuse lighting.
+	SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SpecularBufferTexture)
 /////////////////////////////////end/////////////////////////////////
 	// SSAO
 	SHADER_PARAMETER_RDG_TEXTURE(Texture2D, ScreenSpaceAOTexture)

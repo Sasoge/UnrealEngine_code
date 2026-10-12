@@ -724,9 +724,18 @@ void FSceneTextures::InitializeViewFamily(FRDGBuilder& GraphBuilder, FViewFamily
 				LightingShadowBufferFlags,
 				Config.bRequireMultiView,
 				Config.MobileMultiViewRenderTargetNumLayers);
+			// [DeferredToon] Specular uses the same precision and lifetime as diffuse LightingBuffer.
+			const FRDGTextureDesc SpecularBufferDesc = FRDGTextureDesc::CreateRenderTargetTextureDesc(
+				Config.Extent,
+				PF_FloatRGBA,
+				FClearValueBinding::Black,
+				LightingShadowBufferFlags,
+				Config.bRequireMultiView,
+				Config.MobileMultiViewRenderTargetNumLayers);
 
 			SceneTextures.LightingBuffer = GraphBuilder.CreateTexture(LightingBufferDesc, TEXT("LightingBuffer"));
 			SceneTextures.ShadowBuffer = GraphBuilder.CreateTexture(ShadowBufferDesc, TEXT("ShadowBuffer"));
+			SceneTextures.SpecularBuffer = GraphBuilder.CreateTexture(SpecularBufferDesc, TEXT("SpecularBuffer"));
 		}
 		const FRDGTextureDesc SmallDepthDesc(FRDGTextureDesc::Create2D(SmallDepthExtent, PF_DepthStencil, FClearValueBinding::None, TexCreate_DepthStencilTargetable | TexCreate_ShaderResource));
 		SceneTextures.SmallDepth = GraphBuilder.CreateTexture(SmallDepthDesc, TEXT("SmallDepthZ"));
@@ -958,6 +967,8 @@ TArray<FRDGTextureRef> FSceneTextures::EnumerateSceneTextures() const
 	// [LightingShadowBuffer] Expose optional prototype MRTs to the texture visualizer when allocated.
 	AddTextureIfNonNull(LightingBuffer, Results);
 	AddTextureIfNonNull(ShadowBuffer, Results);
+	// [DeferredToon] Expose the split specular MRT for debug inspection.
+	AddTextureIfNonNull(SpecularBuffer, Results);
 	AddTextureIfNonNull(QuadOverdraw, Results);
 #if WITH_EDITOR
 	AddTextureIfNonNull(EditorPrimitiveColor, Results);
@@ -1057,6 +1068,8 @@ FRDGTextureRef GetSceneTexture(const FSceneTextures& SceneTextures, ESceneTextur
 	// [LightingShadowBuffer] Optional deferred contribution textures.
 	case ESceneTexture::LightingBuffer: return SceneTextures.LightingBuffer;
 	case ESceneTexture::ShadowBuffer:   return SceneTextures.ShadowBuffer;
+	// [DeferredToon] Optional deferred direct-specular contribution texture.
+	case ESceneTexture::SpecularBuffer: return SceneTextures.SpecularBuffer;
 	default:
 		checkNoEntry();
 		return nullptr;
@@ -1095,6 +1108,8 @@ void SetupSceneTextureUniformParameters(
 	// [LightingShadowBuffer] Mobile/forward/disabled views always bind black fallbacks.
 	SceneTextureParameters.LightingBufferTexture = SystemTextures.Black;
 	SceneTextureParameters.ShadowBufferTexture = SystemTextures.Black;
+	// [DeferredToon] Keep the optional specular input safe on non-deferred paths.
+	SceneTextureParameters.SpecularBufferTexture = SystemTextures.Black;
 	/////////////////////end///////////
 	
 	
@@ -1189,6 +1204,11 @@ void SetupSceneTextureUniformParameters(
 		if (EnumHasAnyFlags(SetupMode, ESceneTextureSetupMode::ShadowBuffer) && HasBeenProduced(SceneTextures->ShadowBuffer))
 		{
 			SceneTextureParameters.ShadowBufferTexture = SceneTextures->ShadowBuffer;
+		}
+		// [DeferredToon] Bind only when requested and produced; fallback remains black otherwise.
+		if (EnumHasAnyFlags(SetupMode, ESceneTextureSetupMode::SpecularBuffer) && HasBeenProduced(SceneTextures->SpecularBuffer))
+		{
+			SceneTextureParameters.SpecularBufferTexture = SceneTextures->SpecularBuffer;
 		}
 		//------------------------------------- End------------------------------------------
 
