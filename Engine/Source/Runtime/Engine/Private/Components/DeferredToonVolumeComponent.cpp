@@ -29,6 +29,12 @@ UDeferredToonVolumeComponent::UDeferredToonVolumeComponent(const FObjectInitiali
     , ShadowColorVolumeWeight(0.0f)
     , LightingColorCurve(nullptr)
     , ShadowColorCurve(nullptr)
+    // [DeferredToon] Neutral DirectLight defaults keep NativeComposite unchanged.
+    , DirectLightColor(FLinearColor::White)
+    , DirectLightIntensity(1.0f)
+    , DirectLightThreshold(0.5f)
+    , DirectLightSoftness(0.1f)
+    , DirectShadowColor(FLinearColor::Black)
     , BlendWeight(1.0f)
     , OutputMode(EDeferredToonVolumeOutputMode::NativeComposite)
     , DebugView(EDeferredToonDebugView::ConsoleGlobal)
@@ -184,6 +190,12 @@ void UDeferredToonVolumeComponent::SetShadowColorVolume(UVolumeTexture* NewValue
 void UDeferredToonVolumeComponent::SetShadowColorVolumeWeight(float NewValue) { DTOON_SET(ShadowColorVolumeWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetLightingColorCurve(UCurveLinearColor* NewValue) { DTOON_SET(LightingColorCurve, NewValue, BindCurveDelegates(); MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowColorCurve(UCurveLinearColor* NewValue) { DTOON_SET(ShadowColorCurve, NewValue, BindCurveDelegates(); MarkRenderStateDirty()); }
+// [DeferredToon] DirectLight authoring setters keep the render proxy in sync.
+void UDeferredToonVolumeComponent::SetDirectLightColor(FLinearColor NewValue) { DTOON_SET(DirectLightColor, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetDirectLightIntensity(float NewValue) { DTOON_SET(DirectLightIntensity, FMath::Clamp(NewValue, 0.0f, 16.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetDirectLightThreshold(float NewValue) { DTOON_SET(DirectLightThreshold, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetDirectLightSoftness(float NewValue) { DTOON_SET(DirectLightSoftness, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetDirectShadowColor(FLinearColor NewValue) { DTOON_SET(DirectShadowColor, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetBlendWeight(float NewValue) { DTOON_SET(BlendWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetOutputMode(EDeferredToonVolumeOutputMode NewValue) { DTOON_SET(OutputMode, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetDebugView(EDeferredToonDebugView NewValue) { DTOON_SET(DebugView, NewValue, MarkRenderStateDirty()); }

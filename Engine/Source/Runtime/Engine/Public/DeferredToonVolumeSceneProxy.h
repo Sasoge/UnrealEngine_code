@@ -33,11 +33,18 @@ public:
     bool bEnabled = true;
     float EdgeFalloff = 0.25f;
     float ShadowColorVolumeWeight = 0.0f;
+    // [DeferredToon] Direct-light band controls are POD snapshots for the
+    // renderer; no UObject/component references cross the render boundary.
+    FLinearColor DirectLightColor = FLinearColor::White;
+    float DirectLightIntensity = 1.0f;
+    float DirectLightThreshold = 0.5f;
+    float DirectLightSoftness = 0.1f;
+    FLinearColor DirectShadowColor = FLinearColor::Black;
     float BlendWeight = 1.0f;
     // [DeferredToon] Snapshot the enum as POD so the render thread never
     // retains a UObject/component reference.
     uint8 OutputMode = 0;
-    // [DeferredToon] 255 means use the global console variable; values 1-11
+    // [DeferredToon] 255 means use the global console variable; values 1-13
     // are the editor-facing per-volume debug selector.
     uint8 DebugView = 255;
     // [DeferredToon] Only fixed POD data crosses to the renderer; the asset

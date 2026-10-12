@@ -17,6 +17,12 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     bEnabled = Component->bEnabled;
     EdgeFalloff = Component->EdgeFalloff;
     ShadowColorVolumeWeight = Component->ShadowColorVolumeWeight;
+    // [DeferredToon] Snapshot DirectLight controls as render-thread POD.
+    DirectLightColor = Component->DirectLightColor;
+    DirectLightIntensity = Component->DirectLightIntensity;
+    DirectLightThreshold = Component->DirectLightThreshold;
+    DirectLightSoftness = Component->DirectLightSoftness;
+    DirectShadowColor = Component->DirectShadowColor;
     BlendWeight = Component->BlendWeight;
     OutputMode = static_cast<uint8>(Component->OutputMode);
     DebugView = static_cast<uint8>(Component->DebugView);

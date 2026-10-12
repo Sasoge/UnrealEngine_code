@@ -53,6 +53,12 @@ namespace
 			SHADER_PARAMETER(FVector3f, LocalBoxExtent)
 			SHADER_PARAMETER(float, EdgeFalloff)
 			SHADER_PARAMETER(float, ShadowColorVolumeWeight)
+			// [DeferredToon] DirectLight controls drive the authored lit/shadow band.
+			SHADER_PARAMETER(FVector3f, DirectLightColor)
+			SHADER_PARAMETER(float, DirectLightIntensity)
+			SHADER_PARAMETER(float, DirectLightThreshold)
+			SHADER_PARAMETER(float, DirectLightSoftness)
+			SHADER_PARAMETER(FVector3f, DirectShadowColor)
 			SHADER_PARAMETER(float, BlendWeight)
 			SHADER_PARAMETER(uint32, OutputMode)
 			SHADER_PARAMETER(float, Priority)
@@ -173,6 +179,12 @@ namespace
 		PassParameters->LocalBoxExtent = FVector3f(Volume.LocalBoxExtent);
 		PassParameters->EdgeFalloff = Volume.EdgeFalloff;
 		PassParameters->ShadowColorVolumeWeight = Volume.ShadowColorVolumeWeight;
+		// [DeferredToon] Bind the component's DirectLight band controls per volume.
+		PassParameters->DirectLightColor = FVector3f(Volume.DirectLightColor.R, Volume.DirectLightColor.G, Volume.DirectLightColor.B);
+		PassParameters->DirectLightIntensity = Volume.DirectLightIntensity;
+		PassParameters->DirectLightThreshold = Volume.DirectLightThreshold;
+		PassParameters->DirectLightSoftness = Volume.DirectLightSoftness;
+		PassParameters->DirectShadowColor = FVector3f(Volume.DirectShadowColor.R, Volume.DirectShadowColor.G, Volume.DirectShadowColor.B);
 		PassParameters->BlendWeight = Volume.BlendWeight;
 		PassParameters->OutputMode = uint32(Volume.OutputMode);
 		PassParameters->Priority = float(Volume.GetPriority());
