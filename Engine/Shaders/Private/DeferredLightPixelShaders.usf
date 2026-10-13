@@ -854,9 +854,13 @@ void DeferredLightPixelMain(
 	out float4 OutColor : SV_Target0
 #if LIGHTING_SHADOW_BUFFER_OUTPUT
 	// [LightingShadowBuffer] Hair keeps the reserved buffer slots; Target0 is
-	// its sample-lighting target while Target1/2 remain deterministic buffers.
+	// its sample-lighting target while Target1/2/3 remain deterministic buffers.
 	, out float4 LightingContribution : SV_Target1
 	, out float ShadowContribution : SV_Target2
+	// [DeferredToon] Hair permutations must expose the same independent direct
+	// specular MRT as opaque permutations. Without this declaration the body
+	// below fails global shader compilation when USE_HAIR_LIGHTING is enabled.
+	, out float4 SpecularContribution : SV_Target3
 #endif
 	)
 {
@@ -866,6 +870,7 @@ void DeferredLightPixelMain(
 	// sample-count or lighting-channel early return.
 	LightingContribution = 0;
 	ShadowContribution = 0;
+	SpecularContribution = 0;
 #endif
 
 	const uint2 InCoord = uint2(SVPos.xy);

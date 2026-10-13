@@ -59,3 +59,16 @@ r.Toon.LightingShadowBuffers 1
 r.Toon.DeferredVolumes.DebugView 4
 r.Toon.DeferredVolumes.DebugView 18
 ~~~
+
+## Hair permutation 编译修正（2026-10-14）
+
+全局着色器编译暴露了 Hair lighting permutation 的输出签名遗漏：Hair 分支已经写入独立高光 MRT `SpecularContribution`，但函数参数没有声明 `SV_Target3`，因此在 `FDeferredLightPS` 的 Hair permutation 中会报 `use of undeclared identifier 'SpecularContribution'`。
+
+已在 `Engine/Shaders/Private/DeferredLightPixelShaders.usf` 的 Hair 输出签名中补齐 `SpecularContribution : SV_Target3`，并在所有提前返回前初始化为零。该修改只在 `LIGHTING_SHADOW_BUFFER_OUTPUT` 分支生效，不改变未启用分离 buffer 的 permutation。
+
+修正后的验证：
+
+~~~text
+python -m unittest discover -s tests -p "test_*.py"  # 74/74 OK
+Build.bat UnrealEditor Win64 Development ...          # Result: Succeeded
+~~~
