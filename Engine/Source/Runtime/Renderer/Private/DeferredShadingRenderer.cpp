@@ -3332,7 +3332,10 @@ void FDeferredShadingSceneRenderer::Render(FRDGBuilder& GraphBuilder, const FSce
 			// Clearing only View.ViewRect leaves pooled pixels outside that rect alive;
 			// the later debug/presentation pass then exposes those pixels as moving
 			// rectangles when the viewport changes.
-			if (IsLightingShadowBuffersEnabled() && SceneTextures.LightingBuffer && SceneTextures.ShadowBuffer)
+			// [DeferredToon] SpecularBuffer is an ELoad MRT just like LightingBuffer
+			// and ShadowBuffer; initialize it every view or DebugView 18 can read
+			// pooled/stale rows as horizontal corruption.
+			if (IsLightingShadowBuffersEnabled() && SceneTextures.LightingBuffer && SceneTextures.ShadowBuffer && SceneTextures.SpecularBuffer)
 			{
 				bool bClearedWholeBuffer = false;
 				for (const FViewInfo& View : Views)
@@ -3341,6 +3344,7 @@ void FDeferredShadingSceneRenderer::Render(FRDGBuilder& GraphBuilder, const FSce
 					{
 						AddClearRenderTargetPass(GraphBuilder, SceneTextures.LightingBuffer, FLinearColor::Transparent);
 						AddClearRenderTargetPass(GraphBuilder, SceneTextures.ShadowBuffer, FLinearColor::Transparent);
+						AddClearRenderTargetPass(GraphBuilder, SceneTextures.SpecularBuffer, FLinearColor::Transparent);
 						bClearedWholeBuffer = true;
 					}
 					else
@@ -3349,6 +3353,7 @@ void FDeferredShadingSceneRenderer::Render(FRDGBuilder& GraphBuilder, const FSce
 						// Preserve the first view while initializing only this view's area.
 						AddClearRenderTargetPass(GraphBuilder, SceneTextures.LightingBuffer, FLinearColor::Transparent, View.ViewRect);
 						AddClearRenderTargetPass(GraphBuilder, SceneTextures.ShadowBuffer, FLinearColor::Transparent, View.ViewRect);
+						AddClearRenderTargetPass(GraphBuilder, SceneTextures.SpecularBuffer, FLinearColor::Transparent, View.ViewRect);
 					}
 				}
 			}
