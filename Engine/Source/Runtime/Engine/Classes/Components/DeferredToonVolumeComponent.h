@@ -46,6 +46,7 @@ enum class EDeferredToonDebugView : uint8
     ShadowChannelMask = 16 UMETA(DisplayName="16 - Shadow Channel Mask"),
     CombinedShadowMask = 17 UMETA(DisplayName="17 - Combined Shadow Mask"),
     SpecularDirectLight = 18 UMETA(DisplayName="18 - Specular Direct Light"),
+    ToonShadowMask = 19 UMETA(DisplayName="19 - Toon Shadow Mask"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 

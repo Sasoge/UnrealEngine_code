@@ -225,6 +225,10 @@ void MainPS(
 
 	const float4 LightingBufferSample = DirectLightInput;
 	const float LightingValue = dot(max(LightingBufferSample.rgb, 0.0f), float3(0.2126f, 0.7152f, 0.0722f));
+	// [DeferredToon] DirectLightMask is a lit mask. Its inverse is the
+	// direct-light shadow source used by the final toon shadow union.
+	const float DirectLightMask = step(DirectLightMaskThreshold, LightingValue);
+	const float DirectShadowMask = 1.0f - DirectLightMask;
 	// [DeferredToon] Native UE occlusion and Shadow Channel subtraction are
 	// exported separately. Both masks use this same box weight, then form a
 	// union so overlapping masks do not apply the tint twice.
@@ -245,12 +249,17 @@ void MainPS(
 	const float3 ShadowTint = CombinedShadowMask > 1e-4f
 		? (NativeShadowCurveColor.rgb * NativeShadowContribution + ShadowChannelTint * ShadowChannelContribution) / CombinedShadowMask
 		: 1.0f.xxx;
-	// [DeferredToon] Keep the masks independent. DirectLightMask describes
-	// illumination strength; NativeShadowMask and ShadowChannelMask describe
-	// occlusion sources. The first toon pass uses a strict binary split so the
-	// direct-light debug mask has no soft gradient between lit and unlit areas.
-	// DirectLightMaskSoftness remains reserved for a future opt-in soft mode.
-	const float DirectLightMask = step(DirectLightMaskThreshold, LightingValue);
+	// [DeferredToon] Integrate direct-light shadow and occlusion shadow as a
+	// union. This keeps overlapping sources from double-darkening the result.
+	const float DirectShadowContribution = DirectShadowMask * (1.0f - CombinedShadowMask);
+	const float ToonShadowMask = saturate(DirectShadowMask + CombinedShadowMask - DirectShadowMask * CombinedShadowMask);
+	// A direct-light-only shadow still needs an authored shadow tint. Sample the
+	// full-shadow endpoint and blend it with the native/channel tint when both
+	// sources are present.
+	const float3 DirectShadowTint = SampleColorCurve(1.0f, ShadowColorSamples).rgb;
+	const float3 ToonShadowTint = ToonShadowMask > 1e-4f
+		? (DirectShadowTint * DirectShadowContribution + ShadowTint * CombinedShadowMask) / ToonShadowMask
+		: 1.0f.xxx;
 
 	if (DebugView == 1)
 	{
@@ -261,7 +270,7 @@ void MainPS(
 		// [DeferredToon] Show the actual affected region.  Displaying the raw
 		// curve color made a white curve look like a full-screen pass even when
 		// the volume did not cover the pixel.
-		OutColor = float4(ShadowTint * CombinedShadowMask * Weight, 1.0f);
+		OutColor = float4(ToonShadowTint * ToonShadowMask * Weight, 1.0f);
 	}
 	else if (DebugView == 3)
 	{
@@ -338,13 +347,19 @@ void MainPS(
 		// so roughness/highlight energy cannot contaminate DirectLight debug.
 		OutColor = float4(max(SpecularDirectLightInput.rgb, 0.0f), 1.0f);
 	}
+	else if (DebugView == 19)
+	{
+		// [DeferredToon] Final toon shadow union: direct-light shadow plus
+		// native/Shadow-Channel occlusion shadow.
+		OutColor = float4(ToonShadowMask.xxx, 1.0f);
+	}
 	else
 	{
 		// [DeferredToon] Keep each output policy explicit. NativeComposite is
 		// mode 0 and preserves the original scene-color path byte-for-byte in
 		// behavior; the other modes opt into the staged RT composition.
 		const float3 MappedLighting = SceneColor.rgb * max(LightingColor.rgb, 0.0f);
-		const float3 ShadowedLighting = MappedLighting * lerp(1.0f.xxx, ShadowTint, CombinedShadowMask);
+		const float3 ShadowedLighting = MappedLighting * lerp(1.0f.xxx, ToonShadowTint, ToonShadowMask);
 		const float3 NativeCompositeColor = lerp(SceneColor.rgb, ShadowedLighting, Weight);
 		// [DeferredToon] RecomposeDiffuse starts from GBuffer base color and the
 		// direct-light RT, then applies the volume's shadow and semantic style.
@@ -352,7 +367,7 @@ void MainPS(
 		// unaffected while additional RT layers are still being integrated.
 		const float3 RecomposedDiffuseColor = BaseColorInput.rgb
 			* max(LightingBufferSample.rgb, 0.0f)
-			* lerp(1.0f.xxx, ShadowTint, CombinedShadowMask)
+			* lerp(1.0f.xxx, ToonShadowTint, ToonShadowMask)
 			* max(StyleColor, 0.0f.xxx);
 		const float3 RecomposeOutput = lerp(SceneColor.rgb, RecomposedDiffuseColor, Weight);
 		// [DeferredToon] Replace exposes the authored semantic style directly;
