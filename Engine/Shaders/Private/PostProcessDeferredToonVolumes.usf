@@ -247,12 +247,10 @@ void MainPS(
 		: 1.0f.xxx;
 	// [DeferredToon] Keep the masks independent. DirectLightMask describes
 	// illumination strength; NativeShadowMask and ShadowChannelMask describe
-	// occlusion sources. Style texture mapping consumes them in a later stage.
-	const float DirectLightMaskWidth = max(DirectLightMaskSoftness, 1e-4f);
-	const float DirectLightMask = smoothstep(
-		saturate(DirectLightMaskThreshold - DirectLightMaskWidth),
-		saturate(DirectLightMaskThreshold + DirectLightMaskWidth),
-		LightingValue);
+	// occlusion sources. The first toon pass uses a strict binary split so the
+	// direct-light debug mask has no soft gradient between lit and unlit areas.
+	// DirectLightMaskSoftness remains reserved for a future opt-in soft mode.
+	const float DirectLightMask = step(DirectLightMaskThreshold, LightingValue);
 
 	if (DebugView == 1)
 	{
