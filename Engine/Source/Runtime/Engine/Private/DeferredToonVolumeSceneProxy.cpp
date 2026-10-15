@@ -33,6 +33,37 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     LitColorReplaceWeight = Component->LitColorReplaceWeight;
     ShadowColorReplaceWeight = Component->ShadowColorReplaceWeight;
     OtherLightingWeight = Component->OtherLightingWeight;
+    // [DeferredToon] Resolve authored bands once per proxy update, not per pixel.
+    static_assert(MaxLightBands == UDeferredToonVolumeComponent::MaxLightBands);
+    for (int32 Index = 0; Index < MaxLightBands; ++Index)
+    {
+        LightBandParams[Index] = FVector4f(0, 0, 0, 0);
+        LightBandColors[Index] = FVector4f(0, 0, 0, 1);
+    }
+    if (Component->bUseLightBands && Component->LightBands.Num() >= 2)
+    {
+        TArray<FDeferredToonLightBand> SortedBands;
+        SortedBands.Append(Component->LightBands.GetData(), FMath::Min(Component->LightBands.Num(), MaxLightBands));
+        for (FDeferredToonLightBand& Band : SortedBands)
+        {
+            Band.MinResponse = FMath::IsFinite(Band.MinResponse) ? FMath::Max(Band.MinResponse, 0.0f) : 0.0f;
+            Band.Value = FMath::IsFinite(Band.Value) ? FMath::Clamp(Band.Value, 0.0f, 1.0f) : 0.0f;
+            Band.ShadowMappingWeight = FMath::IsFinite(Band.ShadowMappingWeight) ? FMath::Clamp(Band.ShadowMappingWeight, 0.0f, 1.0f) : 0.0f;
+        }
+        SortedBands.StableSort([](const FDeferredToonLightBand& A, const FDeferredToonLightBand& B) { return A.MinResponse < B.MinResponse; });
+        SortedBands[0].MinResponse = 0.0f;
+        LightBandCount = SortedBands.Num();
+        for (uint32 Index = 0; Index < LightBandCount; ++Index)
+        {
+            const FDeferredToonLightBand& Band = SortedBands[Index];
+            const FLinearColor Color = Band.bOverrideColor ? Band.Color
+                : Component->LightBandColorCurve ? Component->LightBandColorCurve->GetLinearColorValue(Band.Value)
+                : FMath::Lerp(ToonDarkColor, ToonLitColor, Band.Value);
+            LightBandParams[Index] = FVector4f(Band.MinResponse, Band.Value, Band.ShadowMappingWeight,
+                FMath::Lerp(FMath::Clamp(ShadowColorReplaceWeight, 0.0f, 1.0f), FMath::Clamp(LitColorReplaceWeight, 0.0f, 1.0f), Band.Value));
+            LightBandColors[Index] = FVector4f(Color.R, Color.G, Color.B, 1.0f);
+        }
+    }
     ShadowTextureWeight = Component->ShadowTextureWeight;
     ShadowTextureTiling = Component->ShadowTextureTiling;
     ShadowTextureOffset = Component->ShadowTextureOffset;

@@ -47,6 +47,11 @@ public:
     uint8 DebugView = 255;
     // [DeferredToon] Effective selection and color mapping POD/resources.
     float EffectiveLightThreshold = 0.1f;
+    // [DeferredToon] Packed, sorted intervals: minimum, value, texture influence, replace weight.
+    static constexpr int32 MaxLightBands = 8;
+    uint32 LightBandCount = 0;
+    TStaticArray<FVector4f, MaxLightBands> LightBandParams;
+    TStaticArray<FVector4f, MaxLightBands> LightBandColors;
     float LitColorReplaceWeight = 0.0f;
     float ShadowColorReplaceWeight = 1.0f;
     float OtherLightingWeight = 1.0f;

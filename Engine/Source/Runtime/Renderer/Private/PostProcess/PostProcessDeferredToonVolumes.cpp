@@ -25,7 +25,7 @@ namespace
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
 		// [DeferredToon] View 20 previews the new independent two-band output mask.
-		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-19 independent/integrated lighting/shadow masks, 20 ToonRecompose binary shadow, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response."),
+		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light)."),
 		ECVF_RenderThreadSafe);
 
 	class FDeferredToonVolumePS : public FGlobalShader
@@ -73,6 +73,10 @@ namespace
 			SHADER_PARAMETER(uint32, bEffectiveLightAvailable)
             SHADER_PARAMETER_RDG_TEXTURE(Texture2D, EffectiveLightBufferTexture) // [DeferredToon] Explicit provider binding avoids changing every scene-texture shader.
 			SHADER_PARAMETER(float, EffectiveLightThreshold)
+			// [DeferredToon] Sorted discrete palette, no per-band shader permutations.
+			SHADER_PARAMETER(uint32, LightBandCount)
+			SHADER_PARAMETER_ARRAY(FVector4f, LightBandParams, [FDeferredToonVolumeSceneProxy::MaxLightBands])
+			SHADER_PARAMETER_ARRAY(FVector4f, LightBandColors, [FDeferredToonVolumeSceneProxy::MaxLightBands])
 			SHADER_PARAMETER(float, LitColorReplaceWeight)
 			SHADER_PARAMETER(float, ShadowColorReplaceWeight)
 			SHADER_PARAMETER(float, OtherLightingWeight)
@@ -139,7 +143,7 @@ namespace
 		// control.  255 preserves the legacy global console variable path.
 		const uint32 DebugView = Volume.DebugView == 255u
 			? uint32(GetDeferredToonVolumeDebugView())
-			: FMath::Min<uint32>(Volume.DebugView, 23u); // [DeferredToon] Binary and angular previews.
+			: FMath::Min<uint32>(Volume.DebugView, 24u); // [DeferredToon] Band preview appended; existing IDs preserved.
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial
@@ -194,6 +198,13 @@ namespace
 		PassParameters->ToonDarkColor = FVector4f(Volume.ToonDarkColor.R, Volume.ToonDarkColor.G, Volume.ToonDarkColor.B, Volume.ToonDarkColor.A);
 		// [DeferredToon] Raw inputs stay independent of authored style stack order.
 		PassParameters->EffectiveLightThreshold = Volume.EffectiveLightThreshold;
+		// [DeferredToon] Copy every slot, including zeroed inactive entries.
+		PassParameters->LightBandCount = Volume.LightBandCount;
+		for (int32 Index = 0; Index < FDeferredToonVolumeSceneProxy::MaxLightBands; ++Index)
+		{
+			PassParameters->LightBandParams[Index] = Volume.LightBandParams[Index];
+			PassParameters->LightBandColors[Index] = Volume.LightBandColors[Index];
+		}
 		PassParameters->LitColorReplaceWeight = Volume.LitColorReplaceWeight;
 		PassParameters->ShadowColorReplaceWeight = Volume.ShadowColorReplaceWeight;
 		PassParameters->OtherLightingWeight = Volume.OtherLightingWeight;
@@ -228,7 +239,7 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 23); // [DeferredToon] Binary and angular previews.
+	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 24); // [DeferredToon] Discrete light band preview.
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(

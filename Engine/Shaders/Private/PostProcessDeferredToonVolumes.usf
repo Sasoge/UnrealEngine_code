@@ -35,6 +35,10 @@ uint bShadowTextureValid;
 uint bEffectiveLightAvailable;
 Texture2D EffectiveLightBufferTexture; // [DeferredToon] Explicit current-frame provider.
 float EffectiveLightThreshold;
+// [DeferredToon] Packed by the proxy: lower bound, output level, texture weight, replace weight.
+uint LightBandCount;
+float4 LightBandParams[8];
+float4 LightBandColors[8];
 float LitColorReplaceWeight;
 float ShadowColorReplaceWeight;
 float OtherLightingWeight;
@@ -81,6 +85,24 @@ float4 SampleColorCurve(float Value, float4 Samples[16])
 float SampleDeferredToonFacing(float2 UV)
 {
 	return saturate(SpecularBufferTexture.SampleLevel(SpecularBufferSampler, UV, 0).a);
+}
+
+// [DeferredToon] Hard intervals: exact boundaries choose the higher band.
+// Zero physical light and an explicit artistic shadow override select the first band.
+uint SelectDeferredToonLightBand(float Response, float ArtisticShadow)
+{
+    uint Selected = 0u;
+    if (Response > 0.0f && ArtisticShadow < ToonShadowThreshold)
+    {
+        for (uint Index = 1u; Index < min(LightBandCount, 8u); ++Index)
+        {
+            if (Response >= LightBandParams[Index].x)
+            {
+                Selected = Index;
+            }
+        }
+    }
+    return Selected;
 }
 
 float SelectDeferredToonChannel(float4 Value, uint Channel)
@@ -289,6 +311,25 @@ void MainPS(
         saturate(ShadowTextureWeight) * saturate(ShadowTexel.a));
     const float3 AuthoredBase = lerp(1.0f.xxx, GBufferData.BaseColor, saturate(BaseColorWeight));
 
+    // [DeferredToon] Both output modes consume one palette result. A disabled
+    // palette preserves the previous two-band endpoint/texture behavior exactly.
+    const uint SelectedLightBand = SelectDeferredToonLightBand(EffectiveLight.a, ShadowChannelMask);
+    const float SelectedLightBandValue = LightBandCount > 0u ? LightBandParams[SelectedLightBand].y : 1.0f - ToonBinaryShadowMask;
+    float MappedBandColorWeight = lerp(LitColorReplaceWeight, ShadowColorReplaceWeight, ToonBinaryShadowMask);
+    float3 MappedBandColor = lerp(max(ToonLitColor.rgb, 0.0f), AuthoredShadowColor, ToonBinaryShadowMask);
+    if (LightBandCount > 0u)
+    {
+        const float MappingWeight = saturate(LightBandParams[SelectedLightBand].z);
+        MappedBandColorWeight = LightBandParams[SelectedLightBand].w;
+        MappedBandColor = max(LightBandColors[SelectedLightBand].rgb, 0.0f);
+        if (bShadowColorVolumeValid != 0u)
+        {
+            MappedBandColor = lerp(MappedBandColor, max(VolumeColor.rgb, 0.0f), saturate(ShadowColorVolumeWeight) * MappingWeight);
+        }
+        MappedBandColor = lerp(MappedBandColor, max(ShadowTexel.rgb, 0.0f),
+            saturate(ShadowTextureWeight) * saturate(ShadowTexel.a) * MappingWeight);
+    }
+
 	if (DebugView == 1)
 	{
 		OutColor = float4(Weight.xxx, 1.0f);
@@ -400,6 +441,11 @@ void MainPS(
         // the downstream tonemapper, so changing pre-exposure does not dim this view.
         OutColor = float4((EffectiveLight.a / (1.0f + EffectiveLight.a)).xxx * PrimaryView.PreExposure, 1.0f);
     }
+    else if (DebugView == 24)
+    {
+        // [DeferredToon] Data level is discrete, display still passes through the tonemapper.
+        OutColor = float4(SelectedLightBandValue.xxx * PrimaryView.PreExposure, 1.0f);
+    }
 	else
 	{
 		// [DeferredToon] Retain whole-scene tint as an explicit auxiliary policy.
@@ -425,9 +471,9 @@ void MainPS(
 		}
 		else if (OutputMode == 3u)
 		{
-			// [DeferredToon] Select two fixed endpoints, never multiply by native
+			// [DeferredToon] Use the resolved discrete palette, independent of native
 			// SceneColor or lighting energy. BaseColor is optional material detail.
-			const float3 ToonBandColor = lerp(max(ToonLitColor.rgb, 0.0f), AuthoredShadowColor, ToonBinaryShadowMask);
+			const float3 ToonBandColor = MappedBandColor;
 			const float3 ToonSurfaceColor = ToonBandColor * lerp(1.0f.xxx, BaseColorInput.rgb, saturate(BaseColorWeight));
 			// Match the pre-exposed HDR scene before downstream TAA/TSR/tonemap.
 			// SceneColor contributes only where the authored box weight is < 1.
@@ -437,11 +483,9 @@ void MainPS(
         {
             // [DeferredToon] Grade the native visible diffuse, or replace either band.
             // Residual lighting is retained explicitly, without multiplying BaseColor twice.
-            const float3 LitColor = lerp(EffectiveLight.rgb * max(ToonLitColor.rgb, 0.0f),
-                max(ToonLitColor.rgb, 0.0f) * AuthoredBase, saturate(LitColorReplaceWeight));
-            const float3 DarkColor = lerp(EffectiveLight.rgb * AuthoredShadowColor,
-                AuthoredShadowColor * AuthoredBase, saturate(ShadowColorReplaceWeight));
-            const float3 GradedDirect = lerp(LitColor, DarkColor, ToonBinaryShadowMask) * PrimaryView.PreExposure;
+            const float3 BandTintedColor = EffectiveLight.rgb * MappedBandColor;
+            const float3 BandReplacementColor = MappedBandColor * AuthoredBase;
+            const float3 GradedDirect = lerp(BandTintedColor, BandReplacementColor, saturate(MappedBandColorWeight)) * PrimaryView.PreExposure;
             const float3 OriginalColor = Texture2DSampleLevel(OriginalSceneColorTexture, SceneColorSampler, UV, 0).rgb;
             const float3 Residual = max(OriginalColor - EffectiveLight.rgb * PrimaryView.PreExposure, 0.0f);
             OutputColor = lerp(SceneColor.rgb, GradedDirect + Residual * saturate(OtherLightingWeight), Weight);

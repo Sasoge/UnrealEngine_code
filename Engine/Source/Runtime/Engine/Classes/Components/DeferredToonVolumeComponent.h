@@ -12,6 +12,28 @@ class UVolumeTexture;
 class UTexture2D; // [DeferredToon] Optional 2D shadow color mapping.
 class FDeferredToonVolumeSceneProxy;
 
+// [DeferredToon] A discrete lighting interval, independent of material albedo.
+USTRUCT(BlueprintType)
+struct FDeferredToonLightBand
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Light Band", meta=(ClampMin="0.0", ToolTip="Inclusive scene-linear reference response lower bound. Bands are sorted at runtime; the first band covers zero."))
+    float MinResponse = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Light Band", meta=(ClampMin="0.0", ClampMax="1.0", ToolTip="Discrete light level: 0 darkest, 1 brightest. Also selects the color-curve coordinate and interpolates the two Replace Weights."))
+    float Value = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Light Band")
+    bool bOverrideColor = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Light Band", meta=(EditCondition="bOverrideColor", EditConditionHides))
+    FLinearColor Color = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Light Band", meta=(ClampMin="0.0", ClampMax="1.0", ToolTip="Influence of the existing 2D/3D shadow textures on this band. Independent of the band's Value."))
+    float ShadowMappingWeight = 1.0f;
+};
+
 // [DeferredToon] Stable serialized mode IDs. Mode 1 is a migration token only.
 UENUM(BlueprintType)
 enum class EDeferredToonVolumeOutputMode : uint8
@@ -57,6 +79,8 @@ enum class EDeferredToonDebugView : uint8
     // [DeferredToon] Independent scene-linear color and selection inputs.
     EffectiveDirectLight = 22 UMETA(DisplayName="22 - Effective Direct Diffuse"),
     EffectiveLightResponse = 23 UMETA(DisplayName="23 - Effective Light Response"),
+    // [DeferredToon] Display discrete light level; unlike shadow masks, 1 means brightest.
+    LightBandValue = 24 UMETA(DisplayName="24 - Selected Light Band (0 Dark / 1 Light)"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 
@@ -67,6 +91,9 @@ class UDeferredToonVolumeComponent : public USceneComponent
     GENERATED_UCLASS_BODY()
 
 public:
+    // [DeferredToon] Fixed GPU capacity; authored intervals do not create shader permutations.
+    static constexpr int32 MaxLightBands = 8;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume", meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="1.0"))
     bool bEnabled;
 
@@ -108,15 +135,25 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Toon Recompose", meta=(ClampMin="0.0", ClampMax="1.0", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::ToonRecompose || OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", ToolTip="0 uses pure authored replacement colors; 1 multiplies replacement colors/textures by material Base Color."))
     float BaseColorWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Selection", meta=(ClampMin="0.001", ClampMax="1.0", DisplayName="Artistic Shadow Threshold", ToolTip="Cutoff for the separate artistic Shadow Channel override. Physical light selection uses Effective Light Threshold; the final selection stays binary."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Selection", meta=(ClampMin="0.001", ClampMax="1.0", DisplayName="Artistic Shadow Threshold", ToolTip="Cutoff for the separate artistic Shadow Channel override. At or above this value, select the dark band (first band when using multiple levels)."))
     float ToonShadowThreshold;
 
     // [DeferredToon] Selection is independent of material-colored RGB; color mapping follows selection.
     UPROPERTY(BlueprintReadWrite, Category="Deferred Toon Volume|Deprecated", meta=(DeprecatedProperty, DeprecationMessage="Effective lighting is now the only production selector."))
     bool bUseEffectiveLighting = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Selection", meta=(ClampMin="0.0", UIMax="10.0", ToolTip="Scene-linear unit-white diffuse response threshold. No material BaseColor or exposure. Higher values select fewer lit pixels."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Selection", meta=(ClampMin="0.0", UIMax="10.0", EditCondition="!bUseLightBands", ToolTip="Two-band compatibility threshold. With Light Bands enabled, use their Min Response values instead. Debug 14/19/20 retain this binary reference."))
     float EffectiveLightThreshold = 0.1f;
+
+    // [DeferredToon] Opt in so existing serialized volumes retain their two-band behavior.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Light Bands", meta=(ToolTip="Enable 2-8 discrete bands for Direct Light Grade and Toon Recompose. Disabled/invalid arrays retain the two-band selector."))
+    bool bUseLightBands = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Light Bands", meta=(EditCondition="bUseLightBands", EditConditionHides, TitleProperty="Value", ToolTip="First 8 entries are used, sorted by Min Response. Equal thresholds: later entry wins. At least 2 entries required."))
+    TArray<FDeferredToonLightBand> LightBands;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Light Bands", meta=(EditCondition="bUseLightBands", EditConditionHides, ToolTip="Sampled once per band at Value. Per-band Override Color takes precedence; without this curve, interpolate existing shadow/light endpoint colors."))
+    TObjectPtr<UCurveLinearColor> LightBandColorCurve = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Color Mapping", meta=(ClampMin="0.0", ClampMax="1.0", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="0 tints native visible direct diffuse; 1 replaces it with Lighting Color Curve at time 1."))
     float LitColorReplaceWeight = 0.0f;
@@ -193,6 +230,15 @@ public:
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTextureTiling(FVector2D NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTextureOffset(FVector2D NewValue);
 
+    // [DeferredToon] Editor presets and runtime APIs share the same proxy invalidation.
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="Deferred Toon Volume|Light Bands", meta=(DisplayName="Apply Four Light Bands"))
+    ENGINE_API void ApplyFourLightBands();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="Deferred Toon Volume|Light Bands", meta=(DisplayName="Use Two Band Compatibility"))
+    ENGINE_API void UseTwoBandCompatibility();
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume|Light Bands") ENGINE_API void SetUseLightBands(bool NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume|Light Bands") ENGINE_API void SetLightBands(const TArray<FDeferredToonLightBand>& NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume|Light Bands") ENGINE_API void SetLightBandColorCurve(UCurveLinearColor* NewValue);
+
     UFUNCTION(BlueprintPure, Category="Deferred Toon Volume") int32 GetObjectID() const { return ObjectID; }
     ENGINE_API FDeferredToonVolumeSceneProxy* CreateSceneProxy();
 
@@ -217,9 +263,11 @@ protected:
     FDelegateHandle FalloffCurveChangedHandle;
     FDelegateHandle LightingColorCurveChangedHandle;
     FDelegateHandle ShadowColorCurveChangedHandle;
+    FDelegateHandle LightBandColorCurveChangedHandle; // [DeferredToon]
     TWeakObjectPtr<UCurveBase> BoundFalloffCurve;
     TWeakObjectPtr<UCurveBase> BoundLightingColorCurve;
     TWeakObjectPtr<UCurveBase> BoundShadowColorCurve;
+    TWeakObjectPtr<UCurveBase> BoundLightBandColorCurve; // [DeferredToon]
 #endif
 
 private:

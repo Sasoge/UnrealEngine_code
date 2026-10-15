@@ -99,6 +99,12 @@ void UDeferredToonVolumeComponent::BindCurveDelegates()
         BoundShadowColorCurve = ShadowColorCurve;
         ShadowColorCurveChangedHandle = ShadowColorCurve->OnUpdateCurve.AddUObject(this, &UDeferredToonVolumeComponent::OnReferencedCurveChanged);
     }
+    // [DeferredToon] Editing the band palette must refresh CPU-sampled band colors.
+    if (LightBandColorCurve)
+    {
+        BoundLightBandColorCurve = LightBandColorCurve;
+        LightBandColorCurveChangedHandle = LightBandColorCurve->OnUpdateCurve.AddUObject(this, &UDeferredToonVolumeComponent::OnReferencedCurveChanged);
+    }
 #endif
 }
 
@@ -108,12 +114,15 @@ void UDeferredToonVolumeComponent::UnbindCurveDelegates()
     if (BoundFalloffCurve.IsValid() && FalloffCurveChangedHandle.IsValid()) BoundFalloffCurve->OnUpdateCurve.Remove(FalloffCurveChangedHandle);
     if (BoundLightingColorCurve.IsValid() && LightingColorCurveChangedHandle.IsValid()) BoundLightingColorCurve->OnUpdateCurve.Remove(LightingColorCurveChangedHandle);
     if (BoundShadowColorCurve.IsValid() && ShadowColorCurveChangedHandle.IsValid()) BoundShadowColorCurve->OnUpdateCurve.Remove(ShadowColorCurveChangedHandle);
+    if (BoundLightBandColorCurve.IsValid() && LightBandColorCurveChangedHandle.IsValid()) BoundLightBandColorCurve->OnUpdateCurve.Remove(LightBandColorCurveChangedHandle); // [DeferredToon]
     FalloffCurveChangedHandle.Reset();
     LightingColorCurveChangedHandle.Reset();
     ShadowColorCurveChangedHandle.Reset();
     BoundFalloffCurve.Reset();
     BoundLightingColorCurve.Reset();
     BoundShadowColorCurve.Reset();
+    LightBandColorCurveChangedHandle.Reset(); // [DeferredToon]
+    BoundLightBandColorCurve.Reset();
 #endif
 }
 
@@ -230,6 +239,44 @@ void UDeferredToonVolumeComponent::SetShadowTexture(UTexture2D* NewValue) { DTOO
 void UDeferredToonVolumeComponent::SetShadowTextureWeight(float NewValue) { DTOON_SET(ShadowTextureWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTextureTiling(FVector2D NewValue) { DTOON_SET(ShadowTextureTiling, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTextureOffset(FVector2D NewValue) { DTOON_SET(ShadowTextureOffset, NewValue, MarkRenderStateDirty()); }
+// [DeferredToon] Threshold edits never rebuild the underlying lighting RTs.
+void UDeferredToonVolumeComponent::SetUseLightBands(bool NewValue) { DTOON_SET(bUseLightBands, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetLightBandColorCurve(UCurveLinearColor* NewValue) { DTOON_SET(LightBandColorCurve, NewValue, BindCurveDelegates(); MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetLightBands(const TArray<FDeferredToonLightBand>& NewValue)
+{
+    if (AreDynamicDataChangesAllowed())
+    {
+        LightBands = NewValue;
+        if (LightBands.Num() > MaxLightBands) LightBands.SetNum(MaxLightBands);
+        MarkRenderStateDirty();
+    }
+}
+
+void UDeferredToonVolumeComponent::ApplyFourLightBands()
+{
+    if (!AreDynamicDataChangesAllowed()) return;
+    Modify(); // [DeferredToon] Participate in editor undo/dirty tracking, never auto-save.
+    const float Minima[] = { 0.0f, 0.1f, 0.4f, 1.0f };
+    const float Values[] = { 0.0f, 0.3f, 0.6f, 1.0f };
+    LightBands.SetNum(4);
+    for (int32 Index = 0; Index < 4; ++Index)
+    {
+        LightBands[Index] = FDeferredToonLightBand();
+        LightBands[Index].MinResponse = Minima[Index];
+        LightBands[Index].Value = Values[Index];
+        LightBands[Index].ShadowMappingWeight = 1.0f - Values[Index];
+    }
+    bUseLightBands = true;
+    MarkRenderStateDirty();
+}
+
+void UDeferredToonVolumeComponent::UseTwoBandCompatibility()
+{
+    if (!AreDynamicDataChangesAllowed()) return;
+    Modify();
+    bUseLightBands = false; // [DeferredToon] Keep the authored palette for later reuse.
+    MarkRenderStateDirty();
+}
 #undef DTOON_SET
 
 #if WITH_EDITOR
@@ -246,7 +293,8 @@ void UDeferredToonVolumeComponent::HandlePostEditChange(FName PropertyName)
 #if WITH_EDITORONLY_DATA
         if (PropertyName == GET_MEMBER_NAME_CHECKED(UDeferredToonVolumeComponent, FalloffCurve) ||
             PropertyName == GET_MEMBER_NAME_CHECKED(UDeferredToonVolumeComponent, LightingColorCurve) ||
-            PropertyName == GET_MEMBER_NAME_CHECKED(UDeferredToonVolumeComponent, ShadowColorCurve))
+            PropertyName == GET_MEMBER_NAME_CHECKED(UDeferredToonVolumeComponent, ShadowColorCurve) ||
+            PropertyName == GET_MEMBER_NAME_CHECKED(UDeferredToonVolumeComponent, LightBandColorCurve)) // [DeferredToon]
         {
             BindCurveDelegates();
         }
