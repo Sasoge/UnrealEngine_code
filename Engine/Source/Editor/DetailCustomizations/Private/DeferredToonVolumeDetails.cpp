@@ -1,5 +1,13 @@
-// [DeferredToon] Keep rendering/serialization independent from editor presentation.
+﻿// [DeferredToon] Keep rendering/serialization independent from editor presentation.
 #include "DeferredToonVolumeDetails.h"
+#include "DeferredToonDetailsLanguage.h"
+#include "Containers/Ticker.h"
+#include "DetailWidgetRow.h"
+#include "Modules/ModuleManager.h"
+#include "PropertyEditorModule.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/Text/STextBlock.h"
 
 #include "Components/DeferredToonVolumeComponent.h"
 #include "DetailCategoryBuilder.h"
@@ -7,34 +15,89 @@
 #include "IDetailPropertyRow.h"
 #include "PropertyHandle.h"
 
-#define LOCTEXT_NAMESPACE "DeferredToonVolumeDetails"
+namespace
+{
+    void SetLanguageAndRefresh(bool bChinese)
+    {
+        DeferredToonDetailsLanguage::SetChinese(bChinese);
+        // [DeferredToon] Rebuild all details views after the button event returns.
+        // This refreshes native enum options and avoids destroying an active widget.
+        FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float)
+        {
+            if (FPropertyEditorModule* Module = FModuleManager::GetModulePtr<FPropertyEditorModule>(TEXT("PropertyEditor")))
+            {
+                Module->NotifyCustomizationModuleChanged();
+            }
+            return false;
+        }));
+    }
+}
 
 TSharedRef<IDetailCustomization> FDeferredToonVolumeDetails::MakeInstance()
 {
+    DeferredToonDetailsLanguage::Apply(DeferredToonDetailsLanguage::IsChinese());
     return MakeShared<FDeferredToonVolumeDetails>();
 }
 
 void FDeferredToonVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 {
+    const bool bChinese = DeferredToonDetailsLanguage::IsChinese();
+    // [DeferredToon] This preference belongs to the editor user/project, not the volume.
+    IDetailCategoryBuilder& Language = DetailBuilder.EditCategory(TEXT("Toon Language"), FText::FromString(TEXT("界面语言 / Language")));
+    Language.SetSortOrder(-1);
+    Language.AddCustomRow(FText::FromString(TEXT("中文 English Language 语言")))
+    .WholeRowContent()
+    [
+        SNew(SHorizontalBox)
+        + SHorizontalBox::Slot().AutoWidth().Padding(0, 2, 8, 2)
+        [
+            SNew(SButton).Text(FText::FromString(TEXT("中文"))).IsEnabled(!bChinese)
+            .ToolTipText(FText::FromString(TEXT("只切换风格化盒体面板，不修改场景或编辑器全局语言。")))
+            .OnClicked_Lambda([]() { SetLanguageAndRefresh(true); return FReply::Handled(); })
+        ]
+        + SHorizontalBox::Slot().AutoWidth().Padding(0, 2, 0, 2)
+        [
+            SNew(SButton).Text(FText::FromString(TEXT("English"))).IsEnabled(bChinese)
+            .ToolTipText(FText::FromString(TEXT("Change only the toon authoring UI; scene assets and global editor language stay unchanged.")))
+            .OnClicked_Lambda([]() { SetLanguageAndRefresh(false); return FReply::Handled(); })
+        ]
+    ];
     // [DeferredToon] Order by authoring task, not by the order fields were added.
     struct FSection { const TCHAR* Name; FText Label; bool bCollapsed; };
     const FSection Sections[] = {
-        {TEXT("Toon Output"), LOCTEXT("Output", "Toon | Output"), false},
-        {TEXT("Toon Bands"), LOCTEXT("Bands", "Toon | Light Bands"), false},
-        {TEXT("Toon Palette"), LOCTEXT("Palette", "Toon | Colors"), false},
-        {TEXT("Toon Textures"), LOCTEXT("Textures", "Toon | Textures"), true},
-        {TEXT("Toon Bounds"), LOCTEXT("Bounds", "Toon | Box & Blending"), true},
-        {TEXT("Toon Debug"), LOCTEXT("Debug", "Toon | Debug"), true},
-        {TEXT("Toon Advanced"), LOCTEXT("Advanced", "Toon | Advanced"), true},
-        {TEXT("Toon Style Lab"), LOCTEXT("Lab", "Toon | Experimental Layers"), true},
+        {TEXT("Toon Output"), FText::FromString(bChinese ? TEXT("风格化 | 输出") : TEXT("Toon | Output")), false},
+        {TEXT("Toon Bands"), FText::FromString(bChinese ? TEXT("风格化 | 明暗分档") : TEXT("Toon | Light Bands")), false},
+        {TEXT("Toon Palette"), FText::FromString(bChinese ? TEXT("风格化 | 配色") : TEXT("Toon | Colors")), false},
+        {TEXT("Toon Textures"), FText::FromString(bChinese ? TEXT("风格化 | 纹理") : TEXT("Toon | Textures")), true},
+        {TEXT("Toon Bounds"), FText::FromString(bChinese ? TEXT("风格化 | 盒体范围与混合") : TEXT("Toon | Box & Blending")), true},
+        {TEXT("Toon Debug"), FText::FromString(bChinese ? TEXT("风格化 | 调试") : TEXT("Toon | Debug")), true},
+        {TEXT("Toon Advanced"), FText::FromString(bChinese ? TEXT("风格化 | 高级设置") : TEXT("Toon | Advanced")), true},
+        {TEXT("Toon Style Lab"), FText::FromString(bChinese ? TEXT("风格化 | 实验分层") : TEXT("Toon | Experimental Layers")), true},
     };
+    TArray<TPair<FName, FText>> SectionLabels;
+    SectionLabels.Emplace(TEXT("Toon Language"), FText::FromString(TEXT("界面语言 / Language")));
     for (int32 Index = 0; Index < UE_ARRAY_COUNT(Sections); ++Index)
     {
         const FSection& Section = Sections[Index];
         IDetailCategoryBuilder& Category = DetailBuilder.EditCategory(Section.Name, Section.Label);
         Category.SetSortOrder(Index);
         Category.InitiallyCollapsed(Section.bCollapsed);
+        SectionLabels.Emplace(Section.Name, Section.Label);
     }
+
+    // [DeferredToon] Apply names last: native CallInEditor buttons may otherwise
+    // reset the band category's display label when selecting the component itself.
+    DetailBuilder.SortCategories([SectionLabels](const TMap<FName, IDetailCategoryBuilder*>& Categories)
+    {
+        for (int32 Index = 0; Index < SectionLabels.Num(); ++Index)
+        {
+            if (IDetailCategoryBuilder* const* Category = Categories.Find(SectionLabels[Index].Key))
+            {
+                (*Category)->SetDisplayName(SectionLabels[Index].Value);
+                (*Category)->SetSortOrder(Index - 1);
+            }
+        }
+    });
 
     TArray<TWeakObjectPtr<UObject>> Objects;
     DetailBuilder.GetObjectsBeingCustomized(Objects);
@@ -91,5 +154,3 @@ void FDeferredToonVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBu
         }));
     }
 }
-
-#undef LOCTEXT_NAMESPACE

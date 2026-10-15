@@ -52,6 +52,7 @@
 #include "DateTimeStructCustomization.h"
 #include "DebugCameraControllerSettingsCustomization.h"
 #include "DecalComponentDetails.h"
+#include "DeferredToonDetailsLanguage.h" // [DeferredToon] Local authoring language.
 #include "DeferredToonVolumeDetails.h" // [DeferredToon] Task-oriented authoring layout.
 #include "Delegates/Delegate.h"
 #include "DeviceProfileDetails.h"
@@ -176,6 +177,7 @@ void FDetailCustomizationsModule::StartupModule()
 
 	FPropertyEditorModule& PropertyModule = FModuleManager::GetModuleChecked<FPropertyEditorModule>("PropertyEditor");
 	
+	DeferredToonDetailsLanguage::Apply(DeferredToonDetailsLanguage::IsChinese()); // [DeferredToon]
 	RegisterPropertyTypeCustomizations();
 	RegisterObjectCustomizations();
 	RegisterSectionMappings();
@@ -189,6 +191,7 @@ void FDetailCustomizationsModule::StartupModule()
 
 void FDetailCustomizationsModule::ShutdownModule()
 {
+	DeferredToonDetailsLanguage::Apply(false); // [DeferredToon] Restore original metadata when unloading.
 	if (FModuleManager::Get().IsModuleLoaded("PropertyEditor"))
 	{
 		FPropertyEditorModule& PropertyModule = FModuleManager::GetModuleChecked<FPropertyEditorModule>("PropertyEditor");
