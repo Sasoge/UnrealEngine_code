@@ -33,16 +33,29 @@ public:
     bool bEnabled = true;
     float EdgeFalloff = 0.25f;
     float ShadowColorVolumeWeight = 0.0f;
-    // [DeferredToon] Independent DirectLight mask controls are POD snapshots.
-    float DirectLightMaskThreshold = 0.5f;
-    float DirectLightMaskSoftness = 0.1f;
     float BlendWeight = 1.0f;
     // [DeferredToon] Snapshot the enum as POD so the render thread never
     // retains a UObject/component reference.
     uint8 OutputMode = 0;
+    // [DeferredToon] Exact curve endpoints and independent reconstruction POD.
+    float BaseColorWeight = 0.0f;
+    float ToonShadowThreshold = 0.5f;
+    FLinearColor ToonLitColor = FLinearColor::White;
+    FLinearColor ToonDarkColor = FLinearColor::Black;
     // [DeferredToon] 255 means use the global console variable; values 1-13
     // are the editor-facing per-volume debug selector.
     uint8 DebugView = 255;
+    // [DeferredToon] Effective selection and color mapping POD/resources.
+    float EffectiveLightThreshold = 0.1f;
+    float LitColorReplaceWeight = 0.0f;
+    float ShadowColorReplaceWeight = 1.0f;
+    float OtherLightingWeight = 1.0f;
+    float ShadowTextureWeight = 1.0f;
+    FVector2D ShadowTextureTiling = FVector2D(1.0, 1.0);
+    FVector2D ShadowTextureOffset = FVector2D::ZeroVector;
+    FTextureRHIRef ShadowTextureResource;
+    bool bShadowTextureValid = false;
+
     // [DeferredToon] Only fixed POD data crosses to the renderer; the asset
     // pointer itself remains owned by the component/editor side.
     bool bUseStyleProfile = false;
@@ -54,7 +67,6 @@ public:
     FString StableSortPath;
     TStaticArray<float, CurveSampleCount> FalloffSamples;
     TStaticArray<FLinearColor, CurveSampleCount> LightingColorSamples;
-    TStaticArray<FLinearColor, CurveSampleCount> ShadowColorSamples;
     FTextureRHIRef ShadowColorVolumeResource;
     bool bShadowColorVolumeValid = false;
 };

@@ -736,6 +736,8 @@ void FSceneTextures::InitializeViewFamily(FRDGBuilder& GraphBuilder, FViewFamily
 			SceneTextures.LightingBuffer = GraphBuilder.CreateTexture(LightingBufferDesc, TEXT("LightingBuffer"));
 			SceneTextures.ShadowBuffer = GraphBuilder.CreateTexture(ShadowBufferDesc, TEXT("ShadowBuffer"));
 			SceneTextures.SpecularBuffer = GraphBuilder.CreateTexture(SpecularBufferDesc, TEXT("SpecularBuffer"));
+			// [DeferredToon] Same extent/format; cleared before the first additive light.
+			SceneTextures.EffectiveLightBuffer = GraphBuilder.CreateTexture(LightingBufferDesc, TEXT("EffectiveLightBuffer"));
 		}
 		const FRDGTextureDesc SmallDepthDesc(FRDGTextureDesc::Create2D(SmallDepthExtent, PF_DepthStencil, FClearValueBinding::None, TexCreate_DepthStencilTargetable | TexCreate_ShaderResource));
 		SceneTextures.SmallDepth = GraphBuilder.CreateTexture(SmallDepthDesc, TEXT("SmallDepthZ"));
@@ -969,6 +971,7 @@ TArray<FRDGTextureRef> FSceneTextures::EnumerateSceneTextures() const
 	AddTextureIfNonNull(ShadowBuffer, Results);
 	// [DeferredToon] Expose the split specular MRT for debug inspection.
 	AddTextureIfNonNull(SpecularBuffer, Results);
+	AddTextureIfNonNull(EffectiveLightBuffer, Results); // [DeferredToon]
 	AddTextureIfNonNull(QuadOverdraw, Results);
 #if WITH_EDITOR
 	AddTextureIfNonNull(EditorPrimitiveColor, Results);
@@ -1070,6 +1073,7 @@ FRDGTextureRef GetSceneTexture(const FSceneTextures& SceneTextures, ESceneTextur
 	case ESceneTexture::ShadowBuffer:   return SceneTextures.ShadowBuffer;
 	// [DeferredToon] Optional deferred direct-specular contribution texture.
 	case ESceneTexture::SpecularBuffer: return SceneTextures.SpecularBuffer;
+	case ESceneTexture::EffectiveLightBuffer: return SceneTextures.EffectiveLightBuffer; // [DeferredToon]
 	default:
 		checkNoEntry();
 		return nullptr;

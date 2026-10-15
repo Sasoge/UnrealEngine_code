@@ -9,16 +9,20 @@ class UCurveFloat;
 class UCurveLinearColor;
 class UCurveBase;
 class UVolumeTexture;
+class UTexture2D; // [DeferredToon] Optional 2D shadow color mapping.
 class FDeferredToonVolumeSceneProxy;
 
-// [DeferredToon] Explicit output policy keeps the legacy composite as the safe
-// default while allowing a volume to opt into RT-driven color reconstruction.
+// [DeferredToon] Stable serialized mode IDs. Mode 1 is a migration token only.
 UENUM(BlueprintType)
 enum class EDeferredToonVolumeOutputMode : uint8
 {
-    NativeComposite UMETA(DisplayName="Native Composite"),
-    RecomposeDiffuse UMETA(DisplayName="Recompose Diffuse"),
-    Replace UMETA(DisplayName="Replace"),
+    NativeComposite = 0 UMETA(DisplayName="Scene Color Tint (Advanced)"),
+    RecomposeDiffuse = 1 UMETA(Hidden),
+    Replace = 2 UMETA(DisplayName="Style Layers Preview"),
+    // [DeferredToon] Append to preserve serialized values of existing modes.
+    ToonRecompose = 3 UMETA(DisplayName="Toon Recompose"),
+    // [DeferredToon] Grade/replace only native visible direct diffuse, optionally retain other lighting.
+    DirectLightGrade = 4 UMETA(DisplayName="Direct Light Grade"),
 };
 
 // [DeferredToon] Details-panel selector for the same semantic views exposed by
@@ -27,7 +31,7 @@ enum class EDeferredToonVolumeOutputMode : uint8
 UENUM(BlueprintType)
 enum class EDeferredToonDebugView : uint8
 {
-    NativeComposite = 0 UMETA(DisplayName="0 - Native Composite"),
+    NativeComposite = 0 UMETA(DisplayName="0 - Selected Output"),
     BoxInfluence = 1 UMETA(DisplayName="1 - Box Influence"),
     ShadowComposite = 2 UMETA(DisplayName="2 - Shadow Composite"),
     Priority = 3 UMETA(DisplayName="3 - Priority"),
@@ -42,11 +46,17 @@ enum class EDeferredToonDebugView : uint8
     Depth = 12 UMETA(DisplayName="12 - Linear Depth"),
     Velocity = 13 UMETA(DisplayName="13 - Velocity"),
     DirectLightMask = 14 UMETA(DisplayName="14 - Direct Light Mask"),
-    NativeShadowMask = 15 UMETA(DisplayName="15 - Native Shadow Mask"),
-    ShadowChannelMask = 16 UMETA(DisplayName="16 - Shadow Channel Mask"),
+    NativeShadowMask = 15 UMETA(Hidden),
+    ShadowChannelMask = 16 UMETA(Hidden),
     CombinedShadowMask = 17 UMETA(DisplayName="17 - Combined Shadow Mask"),
     SpecularDirectLight = 18 UMETA(DisplayName="18 - Specular Direct Light"),
     ToonShadowMask = 19 UMETA(DisplayName="19 - Toon Shadow Mask"),
+    // [DeferredToon] Strict effective-light selection plus artistic shadow override.
+    ToonBinaryShadowMask = 20 UMETA(DisplayName="20 - Toon Binary Shadow Mask"),
+    DirectLightFacing = 21 UMETA(DisplayName="21 - Direct Light Facing (N dot L)"),
+    // [DeferredToon] Independent scene-linear color and selection inputs.
+    EffectiveDirectLight = 22 UMETA(DisplayName="22 - Effective Direct Diffuse"),
+    EffectiveLightResponse = 23 UMETA(DisplayName="23 - Effective Light Response"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 
@@ -81,13 +91,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume")
     TObjectPtr<UCurveLinearColor> ShadowColorCurve;
 
-    // [DeferredToon] DirectLight controls only define the first independent
-    // mask. Style colors and texture mapping are intentionally deferred until
-    // the mask contract is finalized.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Direct Light", meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="1.0"))
+    // [DeferredToon] Serialized compatibility fields only. No render-thread binding.
+    UPROPERTY(BlueprintReadWrite, Category="Deferred Toon Volume|Deprecated", meta=(DeprecatedProperty, DeprecationMessage="Angular selection retired; use EffectiveLightThreshold."))
     float DirectLightMaskThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Direct Light", meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="0.25"))
+    UPROPERTY(BlueprintReadWrite, Category="Deferred Toon Volume|Deprecated", meta=(DeprecatedProperty, DeprecationMessage="Strict binary selection has no softness."))
     float DirectLightMaskSoftness;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume", meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="1.0"))
@@ -95,6 +102,42 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume")
     EDeferredToonVolumeOutputMode OutputMode;
+
+    // [DeferredToon] Independent two-band output controls; colors come from
+    // LightingColorCurve/ShadowColorCurve at time 1.0 in linear space.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Toon Recompose", meta=(ClampMin="0.0", ClampMax="1.0", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::ToonRecompose || OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", ToolTip="0 uses pure authored replacement colors; 1 multiplies replacement colors/textures by material Base Color."))
+    float BaseColorWeight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Selection", meta=(ClampMin="0.001", ClampMax="1.0", DisplayName="Artistic Shadow Threshold", ToolTip="Cutoff for the separate artistic Shadow Channel override. Physical light selection uses Effective Light Threshold; the final selection stays binary."))
+    float ToonShadowThreshold;
+
+    // [DeferredToon] Selection is independent of material-colored RGB; color mapping follows selection.
+    UPROPERTY(BlueprintReadWrite, Category="Deferred Toon Volume|Deprecated", meta=(DeprecatedProperty, DeprecationMessage="Effective lighting is now the only production selector."))
+    bool bUseEffectiveLighting = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Selection", meta=(ClampMin="0.0", UIMax="10.0", ToolTip="Scene-linear unit-white diffuse response threshold. No material BaseColor or exposure. Higher values select fewer lit pixels."))
+    float EffectiveLightThreshold = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Color Mapping", meta=(ClampMin="0.0", ClampMax="1.0", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="0 tints native visible direct diffuse; 1 replaces it with Lighting Color Curve at time 1."))
+    float LitColorReplaceWeight = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Color Mapping", meta=(ClampMin="0.0", ClampMax="1.0", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="0 tints native visible direct diffuse; 1 replaces it with Shadow Color Curve at time 1, including fully black shadows."))
+    float ShadowColorReplaceWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Color Mapping", meta=(ClampMin="0.0", ClampMax="1.0", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Retain the SceneColor residual after subtracting effective direct diffuse. This is not a separately extracted GI/specular layer. 0 outputs the processed direct layer only."))
+    float OtherLightingWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Shadow Texture", meta=(ToolTip="Optional color texture mapped in box-local space, blended only in the selected shadow region."))
+    TObjectPtr<UTexture2D> ShadowTexture = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Shadow Texture", meta=(ClampMin="0.0", ClampMax="1.0", ToolTip="Blend texture RGB into the shadow target color, also weighted by texture alpha."))
+    float ShadowTextureWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Shadow Texture", meta=(ToolTip="Repeats per box projection. Triplanar projections avoid stretched side walls."))
+    FVector2D ShadowTextureTiling = FVector2D(1.0, 1.0);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Shadow Texture", meta=(ToolTip="UV offset shared by box-local triplanar projections."))
+    FVector2D ShadowTextureOffset = FVector2D::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Deferred Toon Volume|Debug")
     EDeferredToonDebugView DebugView;
@@ -126,15 +169,29 @@ public:
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowColorVolumeWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetLightingColorCurve(UCurveLinearColor* NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowColorCurve(UCurveLinearColor* NewValue);
-    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectLightMaskThreshold(float NewValue);
-    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectLightMaskSoftness(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume", meta=(DeprecatedFunction, DeprecationMessage="Retired compatibility entry; use Effective Light Threshold. This call has no rendering effect.")) ENGINE_API void SetDirectLightMaskThreshold(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume", meta=(DeprecatedFunction, DeprecationMessage="Retired compatibility entry; use Effective Light Threshold. This call has no rendering effect.")) ENGINE_API void SetDirectLightMaskSoftness(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetBlendWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOutputMode(EDeferredToonVolumeOutputMode NewValue);
+    // [DeferredToon] Runtime controls invalidate the render-thread snapshot.
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetBaseColorWeight(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetToonShadowThreshold(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDebugView(EDeferredToonDebugView NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetStyleSource(EDeferredToonStyleSource NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetStyleProfile(UDeferredToonStyleProfile* NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetPriority(int32 NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetObjectID(int32 NewValue);
+
+    // [DeferredToon] Runtime setters refresh the immutable render proxy.
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume", meta=(DeprecatedFunction, DeprecationMessage="Retired compatibility entry; use Effective Light Threshold. This call has no rendering effect.")) ENGINE_API void SetUseEffectiveLighting(bool NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetEffectiveLightThreshold(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetLitColorReplaceWeight(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowColorReplaceWeight(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOtherLightingWeight(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTexture(UTexture2D* NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTextureWeight(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTextureTiling(FVector2D NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTextureOffset(FVector2D NewValue);
 
     UFUNCTION(BlueprintPure, Category="Deferred Toon Volume") int32 GetObjectID() const { return ObjectID; }
     ENGINE_API FDeferredToonVolumeSceneProxy* CreateSceneProxy();
@@ -145,6 +202,8 @@ public:
 #endif
 
 protected:
+    // [DeferredToon] Migrate retired serialized output without reusing its enum value.
+    virtual void PostLoad() override;
     virtual void OnRegister() override;
     virtual void OnUnregister() override;
     virtual void CreateRenderState_Concurrent(FRegisterComponentContext* Context) override;

@@ -7,6 +7,7 @@
 SCREEN_PASS_TEXTURE_VIEWPORT(Input)
 
 Texture2D SceneColorTexture;
+Texture2D OriginalSceneColorTexture; // [DeferredToon] Immutable residual source for overlapping volumes.
 SamplerState SceneColorSampler;
 Texture2D ShadowBufferTexture;
 SamplerState ShadowBufferSampler;
@@ -20,10 +21,26 @@ float4x4 WorldToLocal;
 float3 LocalBoxExtent;
 float EdgeFalloff;
 float ShadowColorVolumeWeight;
-float DirectLightMaskThreshold;
-float DirectLightMaskSoftness;
 float BlendWeight;
 uint OutputMode;
+// [DeferredToon] Independent reconstruction uses scene-linear authored colors.
+float BaseColorWeight;
+float ToonShadowThreshold;
+float4 ToonLitColor;
+float4 ToonDarkColor;
+// [DeferredToon] Effective-light selection and optional color texture.
+Texture2D ShadowTexture;
+SamplerState ShadowTextureSampler;
+uint bShadowTextureValid;
+uint bEffectiveLightAvailable;
+Texture2D EffectiveLightBufferTexture; // [DeferredToon] Explicit current-frame provider.
+float EffectiveLightThreshold;
+float LitColorReplaceWeight;
+float ShadowColorReplaceWeight;
+float OtherLightingWeight;
+float ShadowTextureWeight;
+float2 ShadowTextureTiling;
+float2 ShadowTextureOffset;
 float Priority;
 uint bShadowColorVolumeValid;
 uint DebugView;
@@ -44,7 +61,6 @@ uint InputNumLayers;
 // global shader compilation fail before the editor could start.
 float4 FalloffSamples[4];
 float4 LightingColorSamples[16];
-float4 ShadowColorSamples[16];
 
 float SampleCurve(float Value)
 {
@@ -58,6 +74,13 @@ float4 SampleColorCurve(float Value, float4 Samples[16])
 	const float Position = saturate(Value) * 15.0f;
 	const uint Index = min((uint)Position, 14u);
 	return lerp(Samples[Index], Samples[Index + 1], frac(Position));
+}
+
+// [DeferredToon] Storage is packed, but the semantic is independent of specular.
+// Point sampling matches the current-frame GBuffer pixel before TAA/TSR.
+float SampleDeferredToonFacing(float2 UV)
+{
+	return saturate(SpecularBufferTexture.SampleLevel(SpecularBufferSampler, UV, 0).a);
 }
 
 float SelectDeferredToonChannel(float4 Value, uint Channel)
@@ -124,8 +147,19 @@ float4 EvaluateDeferredToonInput(uint LayerIndex, float2 UV, FGBufferData GBuffe
 		SourceValue = SceneTexturesStruct.GBufferVelocityTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
 		break;
 	case 11u: // SpecularDirectLight: unshadowed direct specular contribution.
-		SourceValue = SpecularBufferTexture.SampleLevel(SpecularBufferSampler, UV, 0);
+		// [DeferredToon] Do not expose the packed facing value as specular alpha.
+		SourceValue = float4(SpecularBufferTexture.SampleLevel(SpecularBufferSampler, UV, 0).rgb, 0.0f);
 		break;
+	case 12u: // [DeferredToon] DirectLightFacing: max positive N.L of eligible lights.
+		SourceValue = SampleDeferredToonFacing(UV).xxxx;
+		break;
+    // [DeferredToon] Both new semantics use scene-linear units, not display exposure.
+    case 13u:
+        SourceValue = float4(EffectiveLightBufferTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).rgb * PrimaryView.OneOverPreExposure, 1.0f);
+        break;
+    case 14u:
+        SourceValue = (EffectiveLightBufferTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).a * PrimaryView.OneOverPreExposure).xxxx;
+        break;
 	default:
 		return InputDefaults[LayerIndex];
 	}
@@ -193,23 +227,16 @@ void MainPS(
 	const float3 LocalPosition = mul(float4(WorldPosition, 1.0f), WorldToLocal).xyz;
 	// GBuffer presence distinguishes real deferred surfaces from sky/background pixels.
 	const FGBufferData GBufferData = GetGBufferData(UV);
-	// [DeferredToon] Resolve the fixed first-stage stack through semantic IDs;
-	// profiles later provide the same evaluator with authored layers.
-	const float4 DirectLightInput = EvaluateDeferredToonInput(0u, UV, GBufferData);
-	const float4 NativeShadowInput = EvaluateDeferredToonInput(1u, UV, GBufferData);
-	const float4 ShadowChannelInput = EvaluateDeferredToonInput(2u, UV, GBufferData);
-	const float4 AmbientOcclusionInput = EvaluateDeferredToonInput(3u, UV, GBufferData);
-	const float4 BaseColorInput = EvaluateDeferredToonInput(4u, UV, GBufferData);
-	const float4 WorldNormalInput = EvaluateDeferredToonInput(5u, UV, GBufferData);
-	const float4 RoughnessInput = EvaluateDeferredToonInput(6u, UV, GBufferData);
-	const float4 ShadingModelInput = EvaluateDeferredToonInput(7u, UV, GBufferData);
-	const float4 SpecularDirectLightInput = EvaluateDeferredToonInput(10u, UV, GBufferData);
-	float3 StyleColor;
-	float StyleMask;
-	ComposeDeferredToonStyleLayers(UV, GBufferData, StyleColor, StyleMask);
-	// Keep the named values live in this first-stage pass so shader compilers do
-	// not remove the contract before later layer composition is added.
-	const float SemanticInputKeepAlive = DirectLightInput.a + AmbientOcclusionInput.a + BaseColorInput.a + WorldNormalInput.a + RoughnessInput.a + ShadingModelInput.a + SpecularDirectLightInput.a;
+	// [DeferredToon] Canonical inputs never depend on authored layer order.
+	const float4 DirectLightInput = SceneTexturesStruct.LightingBufferTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+	const float4 BaseColorInput = float4(GBufferData.BaseColor, 1.0f);
+	float3 StyleColor = 1.0f.xxx;
+	float StyleMask = 0.0f;
+	// [DeferredToon] Evaluate user layers only for their output/inspection path.
+	if (OutputMode == 2u || DebugView == 10u || DebugView == 11u)
+	{
+		ComposeDeferredToonStyleLayers(UV, GBufferData, StyleColor, StyleMask);
+	}
 	const float3 NormalizedPosition = LocalPosition / max(LocalBoxExtent * 2.0f, 1e-3f) + 0.5f;
 	const float3 DistanceToEdge = min(NormalizedPosition, 1.0f - NormalizedPosition);
 	const float EdgeDistance = min(DistanceToEdge.x, min(DistanceToEdge.y, DistanceToEdge.z));
@@ -223,43 +250,44 @@ void MainPS(
 	const float SurfaceMask = saturate(dot(GBufferData.WorldNormal, GBufferData.WorldNormal));
 	const float Weight = saturate(BoxWeight * FalloffWeight * BlendWeight) * SurfaceMask;
 
-	const float4 LightingBufferSample = DirectLightInput;
-	const float LightingValue = dot(max(LightingBufferSample.rgb, 0.0f), float3(0.2126f, 0.7152f, 0.0722f));
-	// [DeferredToon] DirectLightMask is a lit mask. Its inverse is the
-	// direct-light shadow source used by the final toon shadow union.
-	const float DirectLightMask = step(DirectLightMaskThreshold, LightingValue);
-	const float DirectShadowMask = 1.0f - DirectLightMask;
-	// [DeferredToon] Native UE occlusion and Shadow Channel subtraction are
-	// exported separately. Both masks use this same box weight, then form a
-	// union so overlapping masks do not apply the tint twice.
-	// [DeferredToon] Use the current-frame native scalar supplied by the
-	// ShadowBuffer semantic. LightingBuffer remains the native accumulation.
-	const float NativeShadowMask = saturate(NativeShadowInput.r);
-	// LightingBufferSample.a is now resolved through the ShadowChannel semantic;
-	// retaining this source name documents the channel contract for legacy users.
-	const float ShadowChannelMask = saturate(ShadowChannelInput.r);
-	const float NativeShadowContribution = NativeShadowMask;
-	const float ShadowChannelContribution = ShadowChannelMask * (1.0f - NativeShadowMask);
-	const float CombinedShadowMask = saturate(NativeShadowContribution + ShadowChannelContribution);
-	const float4 LightingColor = SampleColorCurve(saturate(LightingValue), LightingColorSamples);
-	const float4 NativeShadowCurveColor = SampleColorCurve(NativeShadowMask, ShadowColorSamples);
-	const float4 ShadowChannelCurveColor = SampleColorCurve(ShadowChannelMask, ShadowColorSamples);
-	const float4 VolumeColor = bShadowColorVolumeValid != 0 ? Texture3DSampleLevel(ShadowColorVolume, ShadowColorVolumeSampler, saturate(NormalizedPosition), 0) : ShadowChannelCurveColor;
-	const float3 ShadowChannelTint = lerp(ShadowChannelCurveColor.rgb, VolumeColor.rgb, saturate(ShadowColorVolumeWeight));
-	const float3 ShadowTint = CombinedShadowMask > 1e-4f
-		? (NativeShadowCurveColor.rgb * NativeShadowContribution + ShadowChannelTint * ShadowChannelContribution) / CombinedShadowMask
-		: 1.0f.xxx;
-	// [DeferredToon] Integrate direct-light shadow and occlusion shadow as a
-	// union. This keeps overlapping sources from double-darkening the result.
-	const float DirectShadowContribution = DirectShadowMask * (1.0f - CombinedShadowMask);
-	const float ToonShadowMask = saturate(DirectShadowMask + CombinedShadowMask - DirectShadowMask * CombinedShadowMask);
-	// A direct-light-only shadow still needs an authored shadow tint. Sample the
-	// full-shadow endpoint and blend it with the native/channel tint when both
-	// sources are present.
-	const float3 DirectShadowTint = SampleColorCurve(1.0f, ShadowColorSamples).rgb;
-	const float3 ToonShadowTint = ToonShadowMask > 1e-4f
-		? (DirectShadowTint * DirectShadowContribution + ShadowTint * CombinedShadowMask) / ToonShadowMask
-		: 1.0f.xxx;
+	// [DeferredToon] One production selector: native per-light visibility is
+	// applied BEFORE accumulation. Never reapply the aggregate occlusion mask.
+	const float DirectLightFacing = SampleDeferredToonFacing(UV); // Diagnostic/art input only.
+	const float4 EffectiveLight = max(EffectiveLightBufferTexture.SampleLevel(GlobalPointClampedSampler, UV, 0)
+		* PrimaryView.OneOverPreExposure, 0.0f);
+	const float EffectiveLitMask = EffectiveLight.a > 0.0f ? step(max(EffectiveLightThreshold, 0.0f), EffectiveLight.a) : 0.0f;
+	const float DirectLightMask = EffectiveLitMask;
+	const float NativeShadowMask = saturate(ShadowBufferTexture.SampleLevel(ShadowBufferSampler, UV, 0).r);
+	const float ShadowChannelMask = saturate(DirectLightInput.a);
+	// [DeferredToon] This union is diagnostic only; it does not drive surface colors.
+	const float CombinedShadowMask = saturate(NativeShadowMask + ShadowChannelMask * (1.0f - NativeShadowMask));
+	const float ToonShadowMask = saturate(1.0f - DirectLightMask * (1.0f - ShadowChannelMask));
+	const float ToonBinaryShadowMask = step(ToonShadowThreshold, ToonShadowMask);
+	const float4 VolumeColor = bShadowColorVolumeValid != 0
+		? Texture3DSampleLevel(ShadowColorVolume, ShadowColorVolumeSampler, saturate(NormalizedPosition), 0)
+		: ToonDarkColor;
+
+    // [DeferredToon] Box-local triplanar mapping. Use geometric derivatives for
+    // projection weights, so non-uniform box scale and material normals do not swim.
+    float3 ProjectionWeight = abs(cross(ddx(LocalPosition), ddy(LocalPosition)));
+    ProjectionWeight /= max(max(ProjectionWeight.x, max(ProjectionWeight.y, ProjectionWeight.z)), 1e-8f);
+    ProjectionWeight = pow(ProjectionWeight, 4.0f);
+    ProjectionWeight /= max(dot(ProjectionWeight, 1.0f.xxx), 1e-8f);
+    float4 ShadowTexel = 0.0f;
+    if (bShadowTextureValid != 0u)
+    {
+        ShadowTexel = Texture2DSample(ShadowTexture, ShadowTextureSampler, NormalizedPosition.yz * ShadowTextureTiling + ShadowTextureOffset) * ProjectionWeight.x
+            + Texture2DSample(ShadowTexture, ShadowTextureSampler, NormalizedPosition.zx * ShadowTextureTiling + ShadowTextureOffset) * ProjectionWeight.y
+            + Texture2DSample(ShadowTexture, ShadowTextureSampler, NormalizedPosition.xy * ShadowTextureTiling + ShadowTextureOffset) * ProjectionWeight.z;
+    }
+    float3 AuthoredShadowColor = max(ToonDarkColor.rgb, 0.0f);
+    if (bShadowColorVolumeValid != 0u)
+    {
+        AuthoredShadowColor = lerp(AuthoredShadowColor, max(VolumeColor.rgb, 0.0f), saturate(ShadowColorVolumeWeight));
+    }
+    AuthoredShadowColor = lerp(AuthoredShadowColor, max(ShadowTexel.rgb, 0.0f),
+        saturate(ShadowTextureWeight) * saturate(ShadowTexel.a));
+    const float3 AuthoredBase = lerp(1.0f.xxx, GBufferData.BaseColor, saturate(BaseColorWeight));
 
 	if (DebugView == 1)
 	{
@@ -270,7 +298,7 @@ void MainPS(
 		// [DeferredToon] Show the actual affected region.  Displaying the raw
 		// curve color made a white curve look like a full-screen pass even when
 		// the volume did not cover the pixel.
-		OutColor = float4(ToonShadowTint * ToonShadowMask * Weight, 1.0f);
+		OutColor = float4(AuthoredShadowColor * ToonBinaryShadowMask * Weight, 1.0f);
 	}
 	else if (DebugView == 3)
 	{
@@ -282,11 +310,11 @@ void MainPS(
 	}
 	else if (DebugView == 5)
 	{
-		OutColor = float4(NativeShadowInput.rrr, 1.0f);
+		OutColor = float4(NativeShadowMask.xxx, 1.0f);
 	}
 	else if (DebugView == 6)
 	{
-		OutColor = float4(ShadowChannelInput.rrr, 1.0f);
+		OutColor = float4(ShadowChannelMask.xxx, 1.0f);
 	}
 	else if (DebugView == 7)
 	{
@@ -294,11 +322,11 @@ void MainPS(
 	}
 	else if (DebugView == 8)
 	{
-		OutColor = float4(saturate(WorldNormalInput.rgb), 1.0f);
+		OutColor = float4(saturate(GBufferData.WorldNormal * 0.5f + 0.5f), 1.0f);
 	}
 	else if (DebugView == 9)
 	{
-		OutColor = float4(AmbientOcclusionInput.rrr, 1.0f);
+		OutColor = float4(SceneTexturesStruct.ScreenSpaceAOTexture.SampleLevel(SceneTexturesStruct_ScreenSpaceAOTextureSampler, UV, 0).rrr, 1.0f);
 	}
 	else if (DebugView == 10)
 	{
@@ -345,47 +373,79 @@ void MainPS(
 	{
 		// [DeferredToon] Direct specular contribution is visible independently
 		// so roughness/highlight energy cannot contaminate DirectLight debug.
-		OutColor = float4(max(SpecularDirectLightInput.rgb, 0.0f), 1.0f);
+		OutColor = float4(max(SpecularBufferTexture.SampleLevel(SpecularBufferSampler, UV, 0).rgb, 0.0f), 1.0f);
 	}
 	else if (DebugView == 19)
 	{
-		// [DeferredToon] Final toon shadow union: direct-light shadow plus
-		// native/Shadow-Channel occlusion shadow.
+		// [DeferredToon] Effective dark selection plus the explicit artistic subtraction.
 		OutColor = float4(ToonShadowMask.xxx, 1.0f);
 	}
+	else if (DebugView == 20)
+	{
+		// [DeferredToon] Preview the exact binary selector used by mode 3.
+		OutColor = float4(ToonBinaryShadowMask.xxx, 1.0f);
+	}
+	else if (DebugView == 21)
+	{
+		// [DeferredToon] Inspect the raw angular input independently of thresholding.
+		OutColor = float4(DirectLightFacing.xxx, 1.0f);
+	}
+    else if (DebugView == 22)
+    {
+        OutColor = float4(EffectiveLight.rgb * PrimaryView.PreExposure, 1.0f);
+    }
+    else if (DebugView == 23)
+    {
+        // [DeferredToon] Compress the decoded scene-linear value, then re-encode for
+        // the downstream tonemapper, so changing pre-exposure does not dim this view.
+        OutColor = float4((EffectiveLight.a / (1.0f + EffectiveLight.a)).xxx * PrimaryView.PreExposure, 1.0f);
+    }
 	else
 	{
-		// [DeferredToon] Keep each output policy explicit. NativeComposite is
-		// mode 0 and preserves the original scene-color path byte-for-byte in
-		// behavior; the other modes opt into the staged RT composition.
-		const float3 MappedLighting = SceneColor.rgb * max(LightingColor.rgb, 0.0f);
-		const float3 ShadowedLighting = MappedLighting * lerp(1.0f.xxx, ToonShadowTint, ToonShadowMask);
-		const float3 NativeCompositeColor = lerp(SceneColor.rgb, ShadowedLighting, Weight);
-		// [DeferredToon] RecomposeDiffuse starts from GBuffer base color and the
-		// direct-light RT, then applies the volume's shadow and semantic style.
-		// It intentionally stays behind an explicit mode so existing content is
-		// unaffected while additional RT layers are still being integrated.
-		const float3 RecomposedDiffuseColor = BaseColorInput.rgb
-			* max(LightingBufferSample.rgb, 0.0f)
-			* lerp(1.0f.xxx, ToonShadowTint, ToonShadowMask)
-			* max(StyleColor, 0.0f.xxx);
-		const float3 RecomposeOutput = lerp(SceneColor.rgb, RecomposedDiffuseColor, Weight);
-		// [DeferredToon] Replace exposes the authored semantic style directly;
-		// this is useful for validating a profile before adding more operations.
-		const float3 ReplaceOutput = lerp(SceneColor.rgb, StyleColor, Weight);
-		float3 OutputColor;
+		// [DeferredToon] Retain whole-scene tint as an explicit auxiliary policy.
+		// Diffuse reconstruction no longer multiplies material BaseColor twice.
+		float3 OutputColor = SceneColor.rgb;
+		if (OutputMode != 2u && bEffectiveLightAvailable == 0u)
+		{
+			// Missing lighting data is not evidence of shadow. Preserve the scene.
+			OutColor = SceneColor;
+			return;
+		}
 		if (OutputMode == 0u)
 		{
-			OutputColor = NativeCompositeColor;
-		}
-		else if (OutputMode == 1u)
-		{
-			OutputColor = RecomposeOutput;
+			const float LightingValue = dot(max(DirectLightInput.rgb, 0.0f), float3(0.2126f, 0.7152f, 0.0722f));
+			const float4 LightingColor = SampleColorCurve(saturate(LightingValue), LightingColorSamples);
+			const float3 MappedLighting = SceneColor.rgb * max(LightingColor.rgb, 0.0f);
+			const float3 ShadowedLighting = MappedLighting * lerp(1.0f.xxx, AuthoredShadowColor, ToonBinaryShadowMask);
+			OutputColor = lerp(SceneColor.rgb, ShadowedLighting, Weight);
 		}
 		else if (OutputMode == 2u)
 		{
-			OutputColor = ReplaceOutput;
+			OutputColor = lerp(SceneColor.rgb, StyleColor, Weight);
 		}
+		else if (OutputMode == 3u)
+		{
+			// [DeferredToon] Select two fixed endpoints, never multiply by native
+			// SceneColor or lighting energy. BaseColor is optional material detail.
+			const float3 ToonBandColor = lerp(max(ToonLitColor.rgb, 0.0f), AuthoredShadowColor, ToonBinaryShadowMask);
+			const float3 ToonSurfaceColor = ToonBandColor * lerp(1.0f.xxx, BaseColorInput.rgb, saturate(BaseColorWeight));
+			// Match the pre-exposed HDR scene before downstream TAA/TSR/tonemap.
+			// SceneColor contributes only where the authored box weight is < 1.
+			OutputColor = lerp(SceneColor.rgb, ToonSurfaceColor * PrimaryView.PreExposure, Weight);
+		}
+        else if (OutputMode == 4u)
+        {
+            // [DeferredToon] Grade the native visible diffuse, or replace either band.
+            // Residual lighting is retained explicitly, without multiplying BaseColor twice.
+            const float3 LitColor = lerp(EffectiveLight.rgb * max(ToonLitColor.rgb, 0.0f),
+                max(ToonLitColor.rgb, 0.0f) * AuthoredBase, saturate(LitColorReplaceWeight));
+            const float3 DarkColor = lerp(EffectiveLight.rgb * AuthoredShadowColor,
+                AuthoredShadowColor * AuthoredBase, saturate(ShadowColorReplaceWeight));
+            const float3 GradedDirect = lerp(LitColor, DarkColor, ToonBinaryShadowMask) * PrimaryView.PreExposure;
+            const float3 OriginalColor = Texture2DSampleLevel(OriginalSceneColorTexture, SceneColorSampler, UV, 0).rgb;
+            const float3 Residual = max(OriginalColor - EffectiveLight.rgb * PrimaryView.PreExposure, 0.0f);
+            OutputColor = lerp(SceneColor.rgb, GradedDirect + Residual * saturate(OtherLightingWeight), Weight);
+        }
 		OutColor = float4(OutputColor, SceneColor.a);
 	}
 }

@@ -161,6 +161,8 @@ struct FSceneTextures : public FMinimalSceneTextures
 	FRDGTextureRef ShadowBuffer{};
 	// [DeferredToon] Deferred-only MRT for unshadowed direct specular lighting.
 	FRDGTextureRef SpecularBuffer{};
+	// [DeferredToon] RGB: visible native diffuse; A: visible unit-white diffuse response.
+	FRDGTextureRef EffectiveLightBuffer{};
 	////////////////End//////////////////
 
 	// Texture used by the quad overdraw debug view mode when enabled.

@@ -27,6 +27,8 @@ enum class ESceneTexture
 	ShadowBuffer,
 	// [DeferredToon] Separate unshadowed direct specular contribution.
 	SpecularBuffer,
+	// [DeferredToon] Shadowed diffuse and material-independent selection input.
+	EffectiveLightBuffer,
 };
 
 RENDERER_API FRDGTextureRef GetSceneTexture(const FSceneTextures& SceneTextures, ESceneTexture InSceneTexture);

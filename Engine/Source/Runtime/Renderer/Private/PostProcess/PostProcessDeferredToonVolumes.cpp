@@ -24,7 +24,8 @@ namespace
 	TAutoConsoleVariable<int32> CVarDeferredToonVolumesDebugView(
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
-		TEXT("Deferred toon volume debug view: 0 NativeComposite, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-19 independent/integrated lighting/shadow masks."),
+		// [DeferredToon] View 20 previews the new independent two-band output mask.
+		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-19 independent/integrated lighting/shadow masks, 20 ToonRecompose binary shadow, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response."),
 		ECVF_RenderThreadSafe);
 
 	class FDeferredToonVolumePS : public FGlobalShader
@@ -44,6 +45,8 @@ namespace
 			SHADER_PARAMETER_STRUCT(FScreenPassTextureViewportParameters, Input)
 			SHADER_PARAMETER_RDG_UNIFORM_BUFFER(FSceneTextureUniformParameters, SceneTextures)
 			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColorTexture)
+			// [DeferredToon] Preserve the original residual across overlapping volumes.
+			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, OriginalSceneColorTexture)
 			SHADER_PARAMETER_SAMPLER(SamplerState, SceneColorSampler)
 			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, ShadowBufferTexture)
 			SHADER_PARAMETER_SAMPLER(SamplerState, ShadowBufferSampler)
@@ -56,12 +59,26 @@ namespace
 			SHADER_PARAMETER(FVector3f, LocalBoxExtent)
 			SHADER_PARAMETER(float, EdgeFalloff)
 			SHADER_PARAMETER(float, ShadowColorVolumeWeight)
-			// [DeferredToon] DirectLight mask controls are separate from future
-			// style texture/color parameters.
-			SHADER_PARAMETER(float, DirectLightMaskThreshold)
-			SHADER_PARAMETER(float, DirectLightMaskSoftness)
 			SHADER_PARAMETER(float, BlendWeight)
 			SHADER_PARAMETER(uint32, OutputMode)
+			// [DeferredToon] Linear authored endpoints for independent output.
+			SHADER_PARAMETER(float, BaseColorWeight)
+			SHADER_PARAMETER(float, ToonShadowThreshold)
+			SHADER_PARAMETER(FVector4f, ToonLitColor)
+			SHADER_PARAMETER(FVector4f, ToonDarkColor)
+			// [DeferredToon] Visible direct layer and box-local texture mapping.
+			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, ShadowTexture)
+			SHADER_PARAMETER_SAMPLER(SamplerState, ShadowTextureSampler)
+			SHADER_PARAMETER(uint32, bShadowTextureValid)
+			SHADER_PARAMETER(uint32, bEffectiveLightAvailable)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, EffectiveLightBufferTexture) // [DeferredToon] Explicit provider binding avoids changing every scene-texture shader.
+			SHADER_PARAMETER(float, EffectiveLightThreshold)
+			SHADER_PARAMETER(float, LitColorReplaceWeight)
+			SHADER_PARAMETER(float, ShadowColorReplaceWeight)
+			SHADER_PARAMETER(float, OtherLightingWeight)
+			SHADER_PARAMETER(float, ShadowTextureWeight)
+			SHADER_PARAMETER(FVector2f, ShadowTextureTiling)
+			SHADER_PARAMETER(FVector2f, ShadowTextureOffset)
 			SHADER_PARAMETER(float, Priority)
 			SHADER_PARAMETER(uint32, bShadowColorVolumeValid)
 			SHADER_PARAMETER(uint32, DebugView)
@@ -77,48 +94,30 @@ namespace
 			SHADER_PARAMETER(uint32, InputNumLayers)
 			SHADER_PARAMETER_SCALAR_ARRAY(float, FalloffSamples, [CurveSampleCount])
 			SHADER_PARAMETER_ARRAY(FVector4f, LightingColorSamples, [CurveSampleCount])
-			SHADER_PARAMETER_ARRAY(FVector4f, ShadowColorSamples, [CurveSampleCount])
 			RENDER_TARGET_BINDING_SLOTS()
 		END_SHADER_PARAMETER_STRUCT()
 	};
 
 	IMPLEMENT_GLOBAL_SHADER(FDeferredToonVolumePS, "/Engine/Private/PostProcessDeferredToonVolumes.usf", "MainPS", SF_Pixel);
 
-	// [DeferredToon] This first-stage stack is intentionally data-driven but
-	// fixed in capacity.  It exercises the scene-input contract before profiles
-	// are introduced; profile layers will replace this list without changing the
-	// shader ABI.
+	// [DeferredToon] Only authored layers enter the style evaluator. Canonical
+	// diagnostics and diffuse mapping bind providers independently of this list.
 	static void FillInputBinding(FDeferredToonVolumePS::FParameters& Parameters, const FDeferredToonVolumeSceneProxy& Volume)
 	{
-		static constexpr EDeferredToonInputId DefaultInputs[InputLayerCount] =
-		{
-			EDeferredToonInputId::DirectLight,
-			EDeferredToonInputId::NativeShadow,
-			EDeferredToonInputId::ShadowChannel,
-			EDeferredToonInputId::AmbientOcclusion,
-			EDeferredToonInputId::BaseColor,
-			EDeferredToonInputId::WorldNormal,
-			EDeferredToonInputId::Roughness,
-			EDeferredToonInputId::ShadingModel,
-			EDeferredToonInputId::Depth,
-			EDeferredToonInputId::Velocity,
-			EDeferredToonInputId::SpecularDirectLight,
-			EDeferredToonInputId::Unknown,
-		};
-
 		// [DeferredToon] Both authoring paths feed the same fixed renderer ABI:
 		// the component inline stack is only a convenience for the details panel.
 		const bool bUseProfile = (Volume.bUseStyleProfile || Volume.bUseInlineStyleLayers) && Volume.InputStack.NumLayers > 0;
-		Parameters.InputNumLayers = bUseProfile ? FMath::Min<uint32>(Volume.InputStack.NumLayers, InputLayerCount) : InputLayerCount;
+		Parameters.InputNumLayers = bUseProfile ? FMath::Min<uint32>(Volume.InputStack.NumLayers, InputLayerCount) : 0u;
 		for (int32 Index = 0; Index < InputLayerCount; ++Index)
 		{
 			const FDeferredToonInputLayer Layer = bUseProfile
 				? Volume.InputStack.Layers[Index]
-				: FDeferredToonInputRegistry::MakeFallbackLayer(DefaultInputs[Index]);
+				: FDeferredToonInputRegistry::MakeFallbackLayer(EDeferredToonInputId::Unknown);
 			const FDeferredToonInputDescriptor* Descriptor = FDeferredToonInputRegistry::ResolveDescriptor(Layer.InputId);
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputIds, Index) = static_cast<uint32>(Layer.InputId);
-			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputChannels, Index) = static_cast<uint32>(Descriptor ? Descriptor->Channel : Layer.Channel);
-			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputAvailability, Index) = Descriptor && Descriptor->bAvailable && Layer.Weight > 0.0f ? 1u : 0u;
+			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputChannels, Index) = static_cast<uint32>(Layer.Channel);
+			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputAvailability, Index) = Descriptor && Descriptor->bAvailable && Layer.Weight > 0.0f
+				&& (Descriptor->Source != EDeferredToonInputSource::EffectiveLightBuffer || Parameters.bEffectiveLightAvailable != 0u) ? 1u : 0u;
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputWeights, Index) = Layer.Weight;
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputInverts, Index) = Layer.bInvert;
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputOperations, Index) = static_cast<uint32>(Layer.Operation);
@@ -130,6 +129,7 @@ namespace
 		FRDGBuilder& GraphBuilder,
 		const FViewInfo& View,
 		const FScreenPassTextureSlice& SceneColor,
+		const FScreenPassTexture& OriginalSceneColor,
 		const FDeferredToonVolumeSceneProxy& Volume,
 		TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures)
 	{
@@ -139,7 +139,7 @@ namespace
 		// control.  255 preserves the legacy global console variable path.
 		const uint32 DebugView = Volume.DebugView == 255u
 			? uint32(GetDeferredToonVolumeDebugView())
-			: FMath::Min<uint32>(Volume.DebugView, 19u);
+			: FMath::Min<uint32>(Volume.DebugView, 23u); // [DeferredToon] Binary and angular previews.
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial
@@ -166,6 +166,7 @@ namespace
 		PassParameters->Input = GetScreenPassTextureViewportParameters(InputViewport);
 		PassParameters->SceneTextures = SceneTextures;
 		PassParameters->SceneColorTexture = Input.Texture;
+		PassParameters->OriginalSceneColorTexture = OriginalSceneColor.Texture; // [DeferredToon]
 		PassParameters->SceneColorSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 		// [DeferredToon] Consume the native ShadowBuffer directly.  The custom
 		// history path was removed because it accumulated camera-space pixels
@@ -184,11 +185,28 @@ namespace
 		PassParameters->LocalBoxExtent = FVector3f(Volume.LocalBoxExtent);
 		PassParameters->EdgeFalloff = Volume.EdgeFalloff;
 		PassParameters->ShadowColorVolumeWeight = Volume.ShadowColorVolumeWeight;
-		// [DeferredToon] Bind only the independent DirectLight mask controls.
-		PassParameters->DirectLightMaskThreshold = Volume.DirectLightMaskThreshold;
-		PassParameters->DirectLightMaskSoftness = Volume.DirectLightMaskSoftness;
 		PassParameters->BlendWeight = Volume.BlendWeight;
 		PassParameters->OutputMode = uint32(Volume.OutputMode);
+		// [DeferredToon] Colors are scene-linear, pre-exposed once in the shader.
+		PassParameters->BaseColorWeight = Volume.BaseColorWeight;
+		PassParameters->ToonShadowThreshold = Volume.ToonShadowThreshold;
+		PassParameters->ToonLitColor = FVector4f(Volume.ToonLitColor.R, Volume.ToonLitColor.G, Volume.ToonLitColor.B, Volume.ToonLitColor.A);
+		PassParameters->ToonDarkColor = FVector4f(Volume.ToonDarkColor.R, Volume.ToonDarkColor.G, Volume.ToonDarkColor.B, Volume.ToonDarkColor.A);
+		// [DeferredToon] Raw inputs stay independent of authored style stack order.
+		PassParameters->EffectiveLightThreshold = Volume.EffectiveLightThreshold;
+		PassParameters->LitColorReplaceWeight = Volume.LitColorReplaceWeight;
+		PassParameters->ShadowColorReplaceWeight = Volume.ShadowColorReplaceWeight;
+		PassParameters->OtherLightingWeight = Volume.OtherLightingWeight;
+		PassParameters->ShadowTextureWeight = Volume.ShadowTextureWeight;
+		PassParameters->ShadowTextureTiling = FVector2f(Volume.ShadowTextureTiling);
+		PassParameters->ShadowTextureOffset = FVector2f(Volume.ShadowTextureOffset);
+        PassParameters->bEffectiveLightAvailable = View.GetSceneTextures().EffectiveLightBuffer && HasBeenProduced(View.GetSceneTextures().EffectiveLightBuffer) ? 1u : 0u;
+        PassParameters->EffectiveLightBufferTexture = PassParameters->bEffectiveLightAvailable ? View.GetSceneTextures().EffectiveLightBuffer : GSystemTextures.GetBlackDummy(GraphBuilder);
+        PassParameters->bShadowTextureValid = Volume.bShadowTextureValid ? 1u : 0u;
+        PassParameters->ShadowTexture = Volume.bShadowTextureValid
+            ? RegisterExternalTexture(GraphBuilder, Volume.ShadowTextureResource.GetReference(), TEXT("DeferredToonVolume.ShadowTexture"))
+            : GSystemTextures.GetBlackDummy(GraphBuilder);
+        PassParameters->ShadowTextureSampler = TStaticSamplerState<SF_Trilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
 		PassParameters->Priority = float(Volume.GetPriority());
 		PassParameters->bShadowColorVolumeValid = Volume.bShadowColorVolumeValid ? 1u : 0u;
 		PassParameters->DebugView = DebugView;
@@ -198,9 +216,7 @@ namespace
 			// Scalar shader arrays use UE's packed layout; write them through the matching helper.
 			GET_SCALAR_ARRAY_ELEMENT(PassParameters->FalloffSamples, Index) = Volume.FalloffSamples[Index];
 			const FLinearColor Lighting = Volume.LightingColorSamples[Index];
-			const FLinearColor Shadow = Volume.ShadowColorSamples[Index];
 			PassParameters->LightingColorSamples[Index] = FVector4f(Lighting.R, Lighting.G, Lighting.B, Lighting.A);
-			PassParameters->ShadowColorSamples[Index] = FVector4f(Shadow.R, Shadow.G, Shadow.B, Shadow.A);
 		}
 		PassParameters->RenderTargets[0] = Output.GetRenderTargetBinding();
 
@@ -212,7 +228,7 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 19);
+	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 23); // [DeferredToon] Binary and angular previews.
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(
@@ -229,11 +245,13 @@ FScreenPassTextureSlice AddDeferredToonVolumePass(
 	TArray<FDeferredToonVolumeSceneProxy*> Volumes;
 	Scene->CollectDeferredToonVolumes(FBox(EForceInit::ForceInit), Volumes);
 	FScreenPassTextureSlice Current = Inputs.SceneColor;
+	// [DeferredToon] Resolve once, not once per box, to avoid repeated residual subtraction.
+	const FScreenPassTexture OriginalSceneColor = FScreenPassTexture::CopyFromSlice(GraphBuilder, Inputs.SceneColor);
 	for (const FDeferredToonVolumeSceneProxy* Volume : Volumes)
 	{
 		if (Volume)
 		{
-			Current = AddVolumePass(GraphBuilder, View, Current, *Volume, Inputs.SceneTextures);
+			Current = AddVolumePass(GraphBuilder, View, Current, OriginalSceneColor, *Volume, Inputs.SceneTextures);
 		}
 	}
 	return Current;

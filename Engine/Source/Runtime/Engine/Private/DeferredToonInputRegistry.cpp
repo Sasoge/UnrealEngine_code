@@ -10,7 +10,7 @@ namespace DeferredToonInputRegistryPrivate
 		static TArray<FDeferredToonInputDescriptor> Descriptors = []
 		{
 			TArray<FDeferredToonInputDescriptor> Result;
-			Result.Reserve(12);
+			Result.Reserve(15); // [DeferredToon] Facing input plus retired descriptor.
 
 			auto Add = [&Result](
 				EDeferredToonInputId Id,
@@ -54,6 +54,11 @@ namespace DeferredToonInputRegistryPrivate
 			// [DeferredToon] Keep specular as a separate semantic input so DirectLight
 			// remains a diffuse mask independent of material roughness.
 			Add(EDeferredToonInputId::SpecularDirectLight, TEXT("SpecularDirectLight"), EDeferredToonInputSource::SpecularBuffer, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0.0f, 0.0f, 0.0f, 1.0f), true);
+			// [DeferredToon] A missing facing provider is unlit, including at threshold zero.
+			Add(EDeferredToonInputId::DirectLightFacing, TEXT("DirectLightFacing"), EDeferredToonInputSource::SpecularBuffer, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Linear, FVector4f(0.0f, 0.0f, 0.0f, 0.0f), true);
+			// [DeferredToon] Shader decodes pre-exposure before exposing these semantic values.
+			Add(EDeferredToonInputId::EffectiveDirectLight, TEXT("EffectiveDirectLight"), EDeferredToonInputSource::EffectiveLightBuffer, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0.0f, 0.0f, 0.0f, 0.0f), true);
+			Add(EDeferredToonInputId::EffectiveLightResponse, TEXT("EffectiveLightResponse"), EDeferredToonInputSource::EffectiveLightBuffer, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0.0f, 0.0f, 0.0f, 0.0f), true);
 			Add(EDeferredToonInputId::DeprecatedShadowBuffer, TEXT("DeprecatedShadowBuffer"), EDeferredToonInputSource::ShadowBuffer, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Linear, FVector4f(1.0f, 1.0f, 1.0f, 1.0f), false, true, EDeferredToonInputId::NativeShadow);
 			return Result;
 		}();

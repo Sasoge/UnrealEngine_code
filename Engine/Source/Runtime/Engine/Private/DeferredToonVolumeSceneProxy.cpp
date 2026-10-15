@@ -5,6 +5,7 @@
 #include "Curves/CurveFloat.h"
 #include "Curves/CurveLinearColor.h"
 #include "Engine/Texture.h"
+#include "Engine/Texture2D.h" // [DeferredToon]
 #include "Engine/VolumeTexture.h"
 #include "TextureResource.h"
 #include "SceneInterface.h"
@@ -17,11 +18,32 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     bEnabled = Component->bEnabled;
     EdgeFalloff = Component->EdgeFalloff;
     ShadowColorVolumeWeight = Component->ShadowColorVolumeWeight;
-    // [DeferredToon] Snapshot DirectLight mask controls as render-thread POD.
-    DirectLightMaskThreshold = Component->DirectLightMaskThreshold;
-    DirectLightMaskSoftness = Component->DirectLightMaskSoftness;
     BlendWeight = Component->BlendWeight;
-    OutputMode = static_cast<uint8>(Component->OutputMode);
+    // [DeferredToon] Also normalize programmatic assignments that bypass the setter/PostLoad.
+    OutputMode = static_cast<uint8>(Component->OutputMode == EDeferredToonVolumeOutputMode::RecomposeDiffuse
+        ? EDeferredToonVolumeOutputMode::DirectLightGrade : Component->OutputMode);
+    // [DeferredToon] Capture actual endpoints, not the legacy half-texel LUT
+    // samples. Changing this mode must not change the legacy curve mapping.
+    BaseColorWeight = FMath::Clamp(Component->BaseColorWeight, 0.0f, 1.0f);
+    ToonShadowThreshold = FMath::Clamp(Component->ToonShadowThreshold, 0.001f, 1.0f);
+    ToonLitColor = Component->LightingColorCurve ? Component->LightingColorCurve->GetLinearColorValue(1.0f) : FLinearColor::White;
+    ToonDarkColor = Component->ShadowColorCurve ? Component->ShadowColorCurve->GetLinearColorValue(1.0f) : FLinearColor::Black;
+    // [DeferredToon] Snapshot selection and color policy, never retain a UObject on the render thread.
+    EffectiveLightThreshold = Component->EffectiveLightThreshold;
+    LitColorReplaceWeight = Component->LitColorReplaceWeight;
+    ShadowColorReplaceWeight = Component->ShadowColorReplaceWeight;
+    OtherLightingWeight = Component->OtherLightingWeight;
+    ShadowTextureWeight = Component->ShadowTextureWeight;
+    ShadowTextureTiling = Component->ShadowTextureTiling;
+    ShadowTextureOffset = Component->ShadowTextureOffset;
+    if (UTexture2D* Texture = Component->ShadowTexture)
+    {
+        if (FTextureResource* Resource = Texture->GetResource())
+        {
+            ShadowTextureResource = Resource->TextureRHI;
+            bShadowTextureValid = ShadowTextureResource.IsValid();
+        }
+    }
     DebugView = static_cast<uint8>(Component->DebugView);
     bUseStyleProfile = Component->StyleSource == EDeferredToonStyleSource::StyleProfile &&
         Component->StyleProfile != nullptr && Component->StyleProfile->Layers.Num() > 0;
@@ -65,7 +87,6 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
         const float SampleTime = (float(Index) + 0.5f) / float(CurveSampleCount);
         FalloffSamples[Index] = Component->FalloffCurve ? Component->FalloffCurve->GetFloatValue(SampleTime) : 1.0f;
         LightingColorSamples[Index] = Component->LightingColorCurve ? Component->LightingColorCurve->GetLinearColorValue(SampleTime) : FLinearColor::White;
-        ShadowColorSamples[Index] = Component->ShadowColorCurve ? Component->ShadowColorCurve->GetLinearColorValue(SampleTime) : FLinearColor::Black;
     }
     if (UVolumeTexture* Volume = Component->ShadowColorVolume)
     {

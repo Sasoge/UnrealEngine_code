@@ -21,6 +21,12 @@ enum class EDeferredToonStyleInputId : uint8
     ShadingModel = 8 UMETA(DisplayName="Shading Model"),
     Depth = 9 UMETA(DisplayName="Depth"),
     Velocity = 10 UMETA(DisplayName="Velocity"),
+    // [DeferredToon] Expose split radiance and orientation as distinct semantics.
+    SpecularDirectLight = 11 UMETA(DisplayName="Specular Direct Light"),
+    DirectLightFacing = 12 UMETA(DisplayName="Direct Light Facing (N dot L)"),
+    // [DeferredToon] Scene-linear visible color and material-independent light response.
+    EffectiveDirectLight = 13 UMETA(DisplayName="Effective Direct Diffuse"),
+    EffectiveLightResponse = 14 UMETA(DisplayName="Effective Light Response"),
     DeprecatedShadowBuffer = 100 UMETA(DisplayName="Deprecated Shadow Buffer"),
 };
 
@@ -43,14 +49,14 @@ enum class EDeferredToonStyleLayerOperation : uint8
     Replace = 2 UMETA(DisplayName="Replace"),
 };
 
-// [DeferredToon] A component can be driven by the built-in stack, an inline
-// stack for quick iteration, or a reusable data asset for production content.
+// [DeferredToon] Optional authored stack for Style Layers Preview. The old
+// built-in test stack is retired; value 2 now selects an empty neutral stack.
 UENUM(BlueprintType)
 enum class EDeferredToonStyleSource : uint8
 {
     StyleProfile = 0 UMETA(DisplayName="Style Profile"),
     InlineLayers = 1 UMETA(DisplayName="Inline Layers"),
-    DefaultStack = 2 UMETA(DisplayName="Default RT Stack"),
+    DefaultStack = 2 UMETA(DisplayName="No Style Layers"),
 };
 
 // [DeferredToon] Data-asset layer metadata uses stable numeric IDs so the

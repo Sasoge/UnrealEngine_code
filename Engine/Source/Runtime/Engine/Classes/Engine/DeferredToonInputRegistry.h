@@ -21,6 +21,11 @@ enum class EDeferredToonInputId : uint16
 	Velocity = 10,
 	// [DeferredToon] Unshadowed direct specular contribution from the split MRT.
 	SpecularDirectLight = 11,
+	// [DeferredToon] Dimensionless max positive N.L, physically packed in specular alpha.
+	DirectLightFacing = 12,
+	// [DeferredToon] New semantics; existing IDs and bounded layer ABI stay stable.
+	EffectiveDirectLight = 13,
+	EffectiveLightResponse = 14,
 
 	// [DeferredToon] Retain retired IDs so old assets can resolve to a
 	// documented fallback instead of silently changing their meaning.
@@ -36,6 +41,7 @@ enum class EDeferredToonInputSource : uint8
 	SpecularBuffer,
 	SceneTextures,
 	GBuffer,
+	EffectiveLightBuffer, // [DeferredToon]
 };
 
 enum class EDeferredToonInputChannel : uint8
@@ -101,9 +107,8 @@ struct FDeferredToonInputLayer
 
 struct FDeferredToonInputStack
 {
-	// [DeferredToon] Keep one slot for every built-in semantic input.  The
-	// capacity is fixed for shader ABI stability, while future providers can
-	// still be selected through the same bounded profile list.
+	// [DeferredToon] Authoring capacity, not the count of registered inputs.
+	// New providers remain selectable without increasing this shader ABI.
 	static constexpr int32 MaxInputLayers = 12;
 	TStaticArray<FDeferredToonInputLayer, MaxInputLayers> Layers;
 	uint32 NumLayers = 0;

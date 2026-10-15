@@ -957,6 +957,7 @@ class FDeferredLightPS : public FGlobalShader
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, ShadowBufferTexture)
 		// [DeferredToon] Explicit direct-specular accumulation target.
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SpecularBufferTexture)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, EffectiveLightBufferTexture) // [DeferredToon]
 		SHADER_PARAMETER(uint32, bWriteLightingShadowBuffers)
 	////////////////////custom////////////////////////////
 		// ToonActorTexture
@@ -2537,6 +2538,7 @@ static void BindLightingShadowBufferMRT(
 	FRDGTextureRef LightingBufferTexture,
 	FRDGTextureRef ShadowBufferTexture,
 	FRDGTextureRef SpecularBufferTexture,
+	FRDGTextureRef EffectiveLightBufferTexture, // [DeferredToon]
 	FRDGTextureRef ToonShadowTexture,
 	FRDGTextureRef SubstrateOpaqueTexture,
 	FRDGTextureRef SubstrateSubSurfaceTexture,
@@ -2552,10 +2554,12 @@ static void BindLightingShadowBufferMRT(
 	check(LightingBufferTexture);
 	check(ShadowBufferTexture);
 	check(SpecularBufferTexture);
+	check(EffectiveLightBufferTexture); // [DeferredToon]
 	RenderTargets[LightingShadowBufferMRT::LightingBuffer] = FRenderTargetBinding(LightingBufferTexture, ERenderTargetLoadAction::ELoad);
 	RenderTargets[LightingShadowBufferMRT::ShadowBuffer] = FRenderTargetBinding(ShadowBufferTexture, ERenderTargetLoadAction::ELoad);
 	// [DeferredToon] Direct specular accumulates independently from diffuse lighting.
 	RenderTargets[LightingShadowBufferMRT::SpecularBuffer] = FRenderTargetBinding(SpecularBufferTexture, ERenderTargetLoadAction::ELoad);
+	RenderTargets[LightingShadowBufferMRT::EffectiveLightBuffer] = FRenderTargetBinding(EffectiveLightBufferTexture, ERenderTargetLoadAction::ELoad); // [DeferredToon]
 
 	if (bToonMainLight)
 	{
@@ -2583,6 +2587,8 @@ static void AddLightingShadowBufferMRTInfo(
 	AddRenderTargetInfo(PF_R16F, TexCreate_RenderTargetable | TexCreate_ShaderResource, RenderTargetsInfo);
 	// [DeferredToon] Match SpecularBuffer's PF_FloatRGBA allocation.
 	AddRenderTargetInfo(PF_FloatRGBA, TexCreate_RenderTargetable | TexCreate_ShaderResource, RenderTargetsInfo);
+	// [DeferredToon] EffectiveLightBuffer is Target4 in every feature-on permutation.
+	AddRenderTargetInfo(PF_FloatRGBA, TexCreate_RenderTargetable | TexCreate_ShaderResource, RenderTargetsInfo);
 	if (bToonMainLight)
 	{
 		AddRenderTargetInfo(PF_R8G8B8A8, TexCreate_RenderTargetable | TexCreate_ShaderResource, RenderTargetsInfo);
@@ -2604,6 +2610,7 @@ static FDeferredLightPS::FParameters GetDeferredLightPSParameters(
 	FRDGTextureRef LightingBufferTexture,
 	FRDGTextureRef ShadowBufferTexture,
 	FRDGTextureRef SpecularBufferTexture,
+	FRDGTextureRef EffectiveLightBufferTexture, // [DeferredToon]
 	bool bWriteLightingShadowBuffers,
 	TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTexturesUniformBuffer,
 	TRDGUniformBufferRef<FHairStrandsViewUniformParameters> HairStrandsUniformBuffer,
@@ -2637,6 +2644,7 @@ static FDeferredLightPS::FParameters GetDeferredLightPSParameters(
 	Out.LightingBufferTexture = LightingBufferTexture ? LightingBufferTexture : BlackDummy;
 	Out.ShadowBufferTexture = ShadowBufferTexture ? ShadowBufferTexture : BlackDummy;
 	Out.SpecularBufferTexture = SpecularBufferTexture ? SpecularBufferTexture : BlackDummy;
+	Out.EffectiveLightBufferTexture = EffectiveLightBufferTexture ? EffectiveLightBufferTexture : BlackDummy; // [DeferredToon]
 	Out.bWriteLightingShadowBuffers = bWriteLightingShadowBuffers ? 1u : 0u;
 	Out.CloudShadowAO = GetCloudShadowAOParameters(GraphBuilder, View, CloudInfo);
 	Out.CloudShadowEnabled = SetupLightCloudTransmittanceParameters(GraphBuilder, Scene, View, LightSceneInfo, Out.CloudShadow) ? 1 : 0;
@@ -2677,6 +2685,7 @@ static FDeferredLightPS::FParameters GetDeferredLightPSParameters(
 			LightingBufferTexture,
 			ShadowBufferTexture,
 			SpecularBufferTexture,
+			EffectiveLightBufferTexture, // [DeferredToon]
 			SceneTextures.ToonShadow,
 			Scene->SubstrateSceneData.SeparatedOpaqueRoughRefractionSceneColor,
 			Scene->SubstrateSceneData.SeparatedSubSurfaceSceneColor,
@@ -2723,12 +2732,14 @@ uint32 SetupLightGraphicsPSOState(
 	GraphicsPSOInit.PrimitiveType = PT_TriangleList;
 	if (bLightingShadowBufferOutput)
 	{
-		// [LightingShadowBuffer] Every feature-on MRT accumulates additively;
+		// [LightingShadowBuffer] Feature-on color targets accumulate additively;
 		// defaults for RT1+ would otherwise overwrite after the first light.
+		// [DeferredToon] MRT3 RGB adds specular; alpha takes max(N.L), never sums.
 		GraphicsPSOInit.BlendState = TStaticBlendState<
 			CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One,
 			CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One,
 			CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One,
+			CW_RGBA, BO_Add, BF_One, BF_One, BO_Max, BF_One, BF_One,
 			CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One,
 			CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One,
 			CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One,
@@ -2976,7 +2987,7 @@ static void RenderLight(
 	const FSceneTextures& FullSceneTextures = View.GetSceneTextures();
 	// [LightingShadowBuffer] Every standard deferred light contributes through
 	// the separated MRTs while the feature is enabled.
-	const bool bWriteLightingShadowBuffers = IsLightingShadowBuffersEnabled() && FullSceneTextures.LightingBuffer && FullSceneTextures.ShadowBuffer && FullSceneTextures.SpecularBuffer;
+	const bool bWriteLightingShadowBuffers = IsLightingShadowBuffersEnabled() && FullSceneTextures.LightingBuffer && FullSceneTextures.ShadowBuffer && FullSceneTextures.SpecularBuffer && FullSceneTextures.EffectiveLightBuffer;
 
 	check(!bUseVirtualShadowMapMask || bIsRadial);		// VSM mask only stores local lights
 
@@ -3019,6 +3030,7 @@ static void RenderLight(
 			bWriteLightingShadowBuffers ? FullSceneTextures.LightingBuffer : nullptr,
 			bWriteLightingShadowBuffers ? FullSceneTextures.ShadowBuffer : nullptr,
 			bWriteLightingShadowBuffers ? FullSceneTextures.SpecularBuffer : nullptr,
+			bWriteLightingShadowBuffers ? FullSceneTextures.EffectiveLightBuffer : nullptr, // [DeferredToon]
 			bWriteLightingShadowBuffers,
 			SceneTextures.UniformBuffer, View.HairStrandsViewData.UniformBuffer,
 			ScreenShadowMaskTexture, LightingChannelsTexture, bCloudShadow, VirtualShadowMapUniformBuffer, ShadowMaskBits, VirtualShadowMapId);
@@ -3161,10 +3173,12 @@ void SetupLightForHairGraphicsPSOState(FGraphicsPipelineStateInitializer& Graphi
 	{
 		// [LightingShadowBuffer] Hair Target1/2 must accumulate with the base
 		// sample-lighting target in every contributing light pass.
+		// [DeferredToon] MRT3 RGB adds specular; alpha takes max(N.L), never sums.
 		GraphicsPSOInit.BlendState = TStaticBlendState<
 			CW_RGBA, BO_Add, BF_One, BF_One, BO_Max, BF_One, BF_One,
 			CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One,
 			CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One,
+			CW_RGBA, BO_Add, BF_One, BF_One, BO_Max, BF_One, BF_One,
 			CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One>::GetRHI();
 	}
 	else
@@ -3213,7 +3227,7 @@ void FDeferredShadingSceneRenderer::RenderLightForHair(
 	const FSceneTextures& FullSceneTextures = View.GetSceneTextures();
 	// [LightingShadowBuffer] Hair deferred lights use the same separated MRTs;
 	// their base Target0 remains the hair sample-lighting texture.
-	const bool bWriteLightingShadowBuffers = IsLightingShadowBuffersEnabled() && FullSceneTextures.LightingBuffer && FullSceneTextures.ShadowBuffer && FullSceneTextures.SpecularBuffer;
+	const bool bWriteLightingShadowBuffers = IsLightingShadowBuffersEnabled() && FullSceneTextures.LightingBuffer && FullSceneTextures.ShadowBuffer && FullSceneTextures.SpecularBuffer && FullSceneTextures.EffectiveLightBuffer;
 
 	FRenderLightForHairParameters* PassParameters = GraphBuilder.AllocParameters<FRenderLightForHairParameters>();
 	// VS - General parameters
@@ -3229,6 +3243,7 @@ void FDeferredShadingSceneRenderer::RenderLightForHair(
 		bWriteLightingShadowBuffers ? FullSceneTextures.LightingBuffer : nullptr,
 		bWriteLightingShadowBuffers ? FullSceneTextures.ShadowBuffer : nullptr,
 		bWriteLightingShadowBuffers ? FullSceneTextures.SpecularBuffer : nullptr,
+		bWriteLightingShadowBuffers ? FullSceneTextures.EffectiveLightBuffer : nullptr, // [DeferredToon]
 		bWriteLightingShadowBuffers,
 		SceneTextures.UniformBuffer,
 		HairStrands::BindHairStrandsViewUniformParameters(View),
@@ -3267,6 +3282,7 @@ void FDeferredShadingSceneRenderer::RenderLightForHair(
 		PassParameters->PS.RenderTargets[4] = FRenderTargetBinding();
 		PassParameters->PS.RenderTargets[5] = FRenderTargetBinding();
 		PassParameters->PS.RenderTargets[6] = FRenderTargetBinding();
+		PassParameters->PS.RenderTargets[7] = FRenderTargetBinding(); // [DeferredToon] Shifted Substrate slot.
 	}
 	// [LightingShadowBuffer] Hair Target0 remains the visibility lighting
 	// texture; the reserved Target1/2 slots accumulate the two buffers.
@@ -3275,6 +3291,7 @@ void FDeferredShadingSceneRenderer::RenderLightForHair(
 		bWriteLightingShadowBuffers ? FullSceneTextures.LightingBuffer : nullptr,
 		bWriteLightingShadowBuffers ? FullSceneTextures.ShadowBuffer : nullptr,
 		bWriteLightingShadowBuffers ? FullSceneTextures.SpecularBuffer : nullptr,
+		bWriteLightingShadowBuffers ? FullSceneTextures.EffectiveLightBuffer : nullptr, // [DeferredToon]
 		nullptr,
 		nullptr,
 		nullptr,
@@ -3437,12 +3454,13 @@ static FSimpleLightsStandardDeferredParameters GetRenderLightSimpleParameters(
 	Out.PS.LightingChannelsTexture = WhiteDummy;
 	Out.PS.LightingChannelsSampler = TStaticSamplerState<SF_Point, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 	const FSceneTextures& FullSceneTextures = View.GetSceneTextures();
-	const bool bWriteLightingShadowBuffers = IsLightingShadowBuffersEnabled() && FullSceneTextures.LightingBuffer && FullSceneTextures.ShadowBuffer && FullSceneTextures.SpecularBuffer;
+	const bool bWriteLightingShadowBuffers = IsLightingShadowBuffersEnabled() && FullSceneTextures.LightingBuffer && FullSceneTextures.ShadowBuffer && FullSceneTextures.SpecularBuffer && FullSceneTextures.EffectiveLightBuffer;
 	// [LightingShadowBuffer] Simple lights use the same explicit buffer
 	// bindings; their native shadow term is zero, so ShadowBuffer remains zero.
 	Out.PS.LightingBufferTexture = bWriteLightingShadowBuffers ? FullSceneTextures.LightingBuffer : GSystemTextures.GetBlackDummy(GraphBuilder);
 	Out.PS.ShadowBufferTexture = bWriteLightingShadowBuffers ? FullSceneTextures.ShadowBuffer : GSystemTextures.GetBlackDummy(GraphBuilder);
 	Out.PS.SpecularBufferTexture = bWriteLightingShadowBuffers ? FullSceneTextures.SpecularBuffer : GSystemTextures.GetBlackDummy(GraphBuilder);
+	Out.PS.EffectiveLightBufferTexture = bWriteLightingShadowBuffers ? FullSceneTextures.EffectiveLightBuffer : GSystemTextures.GetBlackDummy(GraphBuilder); // [DeferredToon]
 	Out.PS.bWriteLightingShadowBuffers = bWriteLightingShadowBuffers ? 1u : 0u;
 	Out.PS.CloudShadowAO = GetCloudShadowAOParameters(GraphBuilder, View, nullptr);
 	Out.PS.CloudShadowEnabled = 0;
@@ -3464,6 +3482,7 @@ static FSimpleLightsStandardDeferredParameters GetRenderLightSimpleParameters(
 		bWriteLightingShadowBuffers ? FullSceneTextures.LightingBuffer : nullptr,
 		bWriteLightingShadowBuffers ? FullSceneTextures.ShadowBuffer : nullptr,
 		bWriteLightingShadowBuffers ? FullSceneTextures.SpecularBuffer : nullptr,
+		bWriteLightingShadowBuffers ? FullSceneTextures.EffectiveLightBuffer : nullptr, // [DeferredToon]
 		FullSceneTextures.ToonShadow,
 		Scene->SubstrateSceneData.SeparatedOpaqueRoughRefractionSceneColor,
 		Scene->SubstrateSceneData.SeparatedSubSurfaceSceneColor,
@@ -3495,7 +3514,7 @@ static void InternalRenderSimpleLightsStandardDeferred(
 	const FSimpleLightArray& SimpleLights,
 	ESubstrateTileType TileType)
 {
-	const bool bWriteLightingShadowBuffers = IsLightingShadowBuffersEnabled() && View.GetSceneTextures().LightingBuffer && View.GetSceneTextures().ShadowBuffer && View.GetSceneTextures().SpecularBuffer;
+	const bool bWriteLightingShadowBuffers = IsLightingShadowBuffersEnabled() && View.GetSceneTextures().LightingBuffer && View.GetSceneTextures().ShadowBuffer && View.GetSceneTextures().SpecularBuffer && View.GetSceneTextures().EffectiveLightBuffer;
 	FSimpleLightsStandardDeferredParameters* PassParameters = GraphBuilder.AllocParameters<FSimpleLightsStandardDeferredParameters>();
 	*PassParameters = GetRenderLightSimpleParameters(
 		GraphBuilder,
@@ -3549,9 +3568,12 @@ static void InternalRenderSimpleLightsStandardDeferred(
 		{
 			// [LightingShadowBuffer] Simple-light MRT writes must load/add just like
 			// regular deferred lights.
+			// [DeferredToon] MRT3 RGB adds specular; alpha takes max(N.L), never sums.
 			GraphicsPSOInit.BlendState = TStaticBlendState<
 				CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One,
 				CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One,
+				CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One,
+				CW_RGBA, BO_Add, BF_One, BF_One, BO_Max, BF_One, BF_One,
 				CW_RGBA, BO_Add, BF_One, BF_One, BO_Add, BF_One, BF_One>::GetRHI();
 		}
 		else

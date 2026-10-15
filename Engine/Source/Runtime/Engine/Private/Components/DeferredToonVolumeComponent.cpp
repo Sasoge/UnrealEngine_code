@@ -1,6 +1,7 @@
 #include "Components/DeferredToonVolumeComponent.h"
 #include "Engine/DeferredToonVolume.h"
 #include "Engine/World.h"
+#include "Engine/Texture2D.h" // [DeferredToon]
 #include "Curves/CurveBase.h"
 #include "Curves/CurveFloat.h"
 #include "Curves/CurveLinearColor.h"
@@ -11,8 +12,7 @@
 #include UE_INLINE_GENERATED_CPP_BY_NAME(DeferredToonVolumeComponent)
 
 // [DeferredToon] Render-state hooks mirror the component into the render-thread scene.
-// These hooks are intentionally kept as free functions: Task 2 can provide scene/proxy implementations
-// without requiring this asset-facing component to depend on the concrete render implementation.
+// Free functions keep the asset-facing component independent of renderer implementation.
 ENGINE_API FDeferredToonVolumeSceneProxy* CreateDeferredToonVolumeSceneProxy(const UDeferredToonVolumeComponent* Component);
 ENGINE_API void AddDeferredToonVolumeProxy(FSceneInterface* Scene, FDeferredToonVolumeSceneProxy* Proxy);
 ENGINE_API void RemoveDeferredToonVolumeProxy(FSceneInterface* Scene, FDeferredToonVolumeSceneProxy* Proxy);
@@ -29,11 +29,14 @@ UDeferredToonVolumeComponent::UDeferredToonVolumeComponent(const FObjectInitiali
     , ShadowColorVolumeWeight(0.0f)
     , LightingColorCurve(nullptr)
     , ShadowColorCurve(nullptr)
-    // [DeferredToon] Neutral mask defaults provide a soft lit/shadow split.
+    // [DeferredToon] Retired serialized fields; not used by the renderer.
     , DirectLightMaskThreshold(0.5f)
     , DirectLightMaskSoftness(0.1f)
     , BlendWeight(1.0f)
     , OutputMode(EDeferredToonVolumeOutputMode::NativeComposite)
+    // [DeferredToon] Start with pure two-color output and a midpoint shadow cut.
+    , BaseColorWeight(0.0f)
+    , ToonShadowThreshold(0.5f)
     , DebugView(EDeferredToonDebugView::ConsoleGlobal)
     , StyleSource(EDeferredToonStyleSource::StyleProfile)
     , StyleProfile(nullptr)
@@ -42,6 +45,16 @@ UDeferredToonVolumeComponent::UDeferredToonVolumeComponent(const FObjectInitiali
     , DeferredToonVolumeSceneProxy(nullptr)
 {
     Mobility = EComponentMobility::Movable;
+}
+
+// [DeferredToon] Preserve old asset IDs but retire the incorrect diffuse reconstruction.
+void UDeferredToonVolumeComponent::PostLoad()
+{
+    Super::PostLoad();
+    if (OutputMode == EDeferredToonVolumeOutputMode::RecomposeDiffuse)
+    {
+        OutputMode = EDeferredToonVolumeOutputMode::DirectLightGrade;
+    }
 }
 
 // [DeferredToon] Curve delegates keep LUT data live while an editor asset is being edited.
@@ -188,10 +201,13 @@ void UDeferredToonVolumeComponent::SetShadowColorVolumeWeight(float NewValue) { 
 void UDeferredToonVolumeComponent::SetLightingColorCurve(UCurveLinearColor* NewValue) { DTOON_SET(LightingColorCurve, NewValue, BindCurveDelegates(); MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowColorCurve(UCurveLinearColor* NewValue) { DTOON_SET(ShadowColorCurve, NewValue, BindCurveDelegates(); MarkRenderStateDirty()); }
 // [DeferredToon] DirectLight mask setters keep the render proxy in sync.
-void UDeferredToonVolumeComponent::SetDirectLightMaskThreshold(float NewValue) { DTOON_SET(DirectLightMaskThreshold, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
-void UDeferredToonVolumeComponent::SetDirectLightMaskSoftness(float NewValue) { DTOON_SET(DirectLightMaskSoftness, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetDirectLightMaskThreshold(float NewValue) { DirectLightMaskThreshold = NewValue; } // [DeferredToon] Compatibility only.
+void UDeferredToonVolumeComponent::SetDirectLightMaskSoftness(float NewValue) { DirectLightMaskSoftness = NewValue; } // [DeferredToon] Compatibility only.
 void UDeferredToonVolumeComponent::SetBlendWeight(float NewValue) { DTOON_SET(BlendWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
-void UDeferredToonVolumeComponent::SetOutputMode(EDeferredToonVolumeOutputMode NewValue) { DTOON_SET(OutputMode, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetOutputMode(EDeferredToonVolumeOutputMode NewValue) { DTOON_SET(OutputMode, NewValue == EDeferredToonVolumeOutputMode::RecomposeDiffuse ? EDeferredToonVolumeOutputMode::DirectLightGrade : NewValue, MarkRenderStateDirty()); }
+// [DeferredToon] Keep independent reconstruction controls synchronized.
+void UDeferredToonVolumeComponent::SetBaseColorWeight(float NewValue) { DTOON_SET(BaseColorWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetToonShadowThreshold(float NewValue) { DTOON_SET(ToonShadowThreshold, FMath::Clamp(NewValue, 0.001f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetDebugView(EDeferredToonDebugView NewValue) { DTOON_SET(DebugView, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetStyleSource(EDeferredToonStyleSource NewValue) { DTOON_SET(StyleSource, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetStyleProfile(UDeferredToonStyleProfile* NewValue) { DTOON_SET(StyleProfile, NewValue, MarkRenderStateDirty()); }
@@ -204,6 +220,16 @@ void UDeferredToonVolumeComponent::SetObjectID(int32 NewValue)
     const int32 EffectiveID = (RequestedID == 0 && IsRegistered()) ? GetDeferredToonVolumePathObjectID(this) : RequestedID;
     DTOON_SET(ObjectID, EffectiveID, MarkRenderStateDirty());
 }
+// [DeferredToon] All mapping edits rebuild the render-thread snapshot.
+void UDeferredToonVolumeComponent::SetUseEffectiveLighting(bool NewValue) { bUseEffectiveLighting = NewValue; } // [DeferredToon] Compatibility only.
+void UDeferredToonVolumeComponent::SetEffectiveLightThreshold(float NewValue) { DTOON_SET(EffectiveLightThreshold, FMath::Max(0.0f, NewValue), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetLitColorReplaceWeight(float NewValue) { DTOON_SET(LitColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetShadowColorReplaceWeight(float NewValue) { DTOON_SET(ShadowColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetOtherLightingWeight(float NewValue) { DTOON_SET(OtherLightingWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetShadowTexture(UTexture2D* NewValue) { DTOON_SET(ShadowTexture, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetShadowTextureWeight(float NewValue) { DTOON_SET(ShadowTextureWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetShadowTextureTiling(FVector2D NewValue) { DTOON_SET(ShadowTextureTiling, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetShadowTextureOffset(FVector2D NewValue) { DTOON_SET(ShadowTextureOffset, NewValue, MarkRenderStateDirty()); }
 #undef DTOON_SET
 
 #if WITH_EDITOR

@@ -117,6 +117,42 @@ Texture2D LightingBufferTexture;
 Texture2D ShadowBufferTexture;
 uint bWriteLightingShadowBuffers;
 
+// [DeferredToon] A material/exposure-independent facing factor. Local attenuation
+// gates influence only; it must not scale N.L. MRT3 alpha blends with MAX across
+// lights, while RGB remains additive specular. Shadow-only lights are excluded.
+float GetDeferredToonFacing(float3 N, float3 L, float LightMask, bool bChannelMatch)
+{
+	N *= rsqrt(max(dot(N, N), 1e-8f));
+	L *= rsqrt(max(dot(L, L), 1e-8f));
+	return bChannelMatch && LightMask > 0.0f ? saturate(dot(N, L)) : 0.0f;
+}
+
+// [DeferredToon] Material-independent selection input: the native diffuse response
+// of a unit-white, non-metallic reference surface. This is NOT the shaded RGB
+// divided by BaseColor. Keep normals, light shape/falloff, visibility and functions.
+// Fixed material parameters also remove roughness/specular/metalness from the mask.
+#if LIGHTING_SHADOW_BUFFER_OUTPUT
+float3 GetDeferredToonEffectiveResponse(float3 Position, float3 CameraVector,
+    FGBufferData Surface, FDeferredLightData Light, float4 Visibility, float Dither, uint2 Pixel)
+{
+    Surface.ShadingModelID = SHADINGMODELID_DEFAULT_LIT;
+    Surface.BaseColor = 1.0f;
+    Surface.DiffuseColor = 1.0f;
+    Surface.SpecularColor = 0.0f;
+    Surface.Metallic = 0.0f;
+    Surface.Specular = 0.0f;
+    Surface.Roughness = 1.0f;
+    Surface.Anisotropy = 0.0f;
+    Surface.CustomData = 0.0f;
+    // [DeferredToon] Reference response must not inherit the material's custom Toon BRDF controls.
+    Light.ToonLight.IsToon = false;
+    Light.SpecularScale = 0.0f;
+    float SurfaceShadow = 1.0f;
+    return max(GetDynamicLightingSplit(Position, CameraVector, Surface, 1.0f,
+        Light, Visibility, Dither, Pixel, SurfaceShadow).DiffuseLighting.rgb, 0.0f);
+}
+#endif
+
 uint GetLightingChannelMask(float2 UV)
 {
 	uint2 IntegerUV = UV * View.BufferSizeAndInvSize.xy;
@@ -284,16 +320,18 @@ void DeferredLightPixelMain(
 	, out float ShadowContribution : SV_Target2
 	// [DeferredToon] Keep direct specular independent from diffuse lighting.
 	, out float4 SpecularContribution : SV_Target3
+	// [DeferredToon] RGB native shadowed diffuse; A unit-white diffuse luminance.
+	, out float4 EffectiveLightContribution : SV_Target4
 #if IS_TOON_MAINLIGHT
-	, out float4 ToonShadow	: SV_Target4
+	, out float4 ToonShadow	: SV_Target5
 #if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
-	, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target5
-	, out float3 OutSubSurfaceSceneColor : SV_Target6
+	, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target6
+	, out float3 OutSubSurfaceSceneColor : SV_Target7
 #endif
 #else
 #if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
-, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target4
-, out float3 OutSubSurfaceSceneColor : SV_Target5
+, out float3 OutOpaqueRoughRefractionSceneColor : SV_Target5
+, out float3 OutSubSurfaceSceneColor : SV_Target6
 #endif
 #endif
 #else
@@ -324,6 +362,7 @@ void DeferredLightPixelMain(
 	LightingContribution = 0;
 	ShadowContribution = 0;
 	SpecularContribution = 0;
+	EffectiveLightContribution = 0; // [DeferredToon] Initialize every permutation / disabled write.
 #endif
 #if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
 	OutOpaqueRoughRefractionSceneColor = 0;
@@ -446,6 +485,10 @@ void DeferredLightPixelMain(
 				// [DeferredToon] Substrate already exposes diffuse/specular split totals.
 				LightingContribution += float4(LightingBufferSubstrateLighting.TotalDiffuseLighting, 0.0f);
 				SpecularContribution += float4(LightingBufferSubstrateLighting.TotalSpecularLighting, 0.0f);
+				// [DeferredToon] Use the Substrate top-layer normal, not a BRDF result.
+				SpecularContribution.a = GetDeferredToonFacing(
+					SubstrateUnpackTopLayerData(SubstratePixelHeader.PackedTopLayerData).WorldNormal,
+					L, LightMask, bLightingChannelMatch);
 			}
 
 			// [LightingShadowBuffer] Keep native UE occlusion and Shadow Channel
@@ -487,7 +530,9 @@ void DeferredLightPixelMain(
 				0.5f,
 				NativeShadowTermsForBuffer);
 			const float NativeShadowVisibilityForBuffer = saturate(NativeShadowTermsForBuffer.SurfaceShadow);
-			const float NativeShadowBufferAmount = bShadowChannelOnly
+			// [DeferredToon] Apply the same receiver-channel policy as native lighting
+			// before accumulation: the box cannot recover per-light channels later.
+			const float NativeShadowBufferAmount = bShadowChannelOnly || !bShadowReceiverChannelMatch
 				? 0.0f
 				: (1.0f - NativeShadowVisibilityForBuffer) * saturate(LightMask);
 			const float ShadowChannelBufferAmount = bShadowChannelOnly
@@ -513,6 +558,20 @@ void DeferredLightPixelMain(
 			EstimatedCost += SubstrateLighting.EstimatedCost;
 
 			OutColor += SubstrateLighting.SceneColor;
+        #if LIGHTING_SHADOW_BUFFER_OUTPUT
+            // [DeferredToon] Native Substrate diffuse RGB, neutral top-normal selection.
+            if (bLightingChannelMatch)
+            {
+                FGBufferData ReferenceSurface = (FGBufferData)0;
+                ReferenceSurface.WorldNormal = SubstrateUnpackTopLayerData(SubstratePixelHeader.PackedTopLayerData).WorldNormal;
+                ReferenceSurface.Depth = SceneDepth;
+                ReferenceSurface.PrecomputedShadowFactors = SubstrateShadowTermInputParameters.PrecomputedShadowFactors;
+                const float3 ReferenceResponse = GetDeferredToonEffectiveResponse(DerivedParams.TranslatedWorldPosition,
+                    DerivedParams.CameraVector, ReferenceSurface, LightData,
+                    SubstrateShadowTermInputParameters.LightAttenuation, SubstrateShadowTermInputParameters.Dither, uint2(PixelPos));
+                EffectiveLightContribution = float4(SubstrateLighting.TotalDiffuseLighting, Luminance(ReferenceResponse));
+            }
+        #endif
 		// [ShadowChannelPrototype] Apply the direct fallback subtraction only when
 		// the separated buffer path is unavailable; with buffers enabled the volume
 		// pass owns this color operation so it can preserve the tint source.
@@ -670,6 +729,9 @@ void DeferredLightPixelMain(
 			// [LightingShadowBuffer] Reserve alpha for the Shadow Channel mask.
 			LightingContribution += float4(UnshadowedLighting.DiffuseLighting.rgb, 0.0f);
 			SpecularContribution += float4(UnshadowedLighting.SpecularLighting.rgb, 0.0f);
+			// [DeferredToon] Preserve pure surface orientation alongside specular RGB.
+			SpecularContribution.a = GetDeferredToonFacing(
+				ScreenSpaceData.GBuffer.WorldNormal, ShadowLightDirection, ShadowLightMask, bLightingChannelMatch);
 		}
 
 		// [LightingShadowBuffer] Keep native UE occlusion in ShadowBuffer and the
@@ -706,7 +768,9 @@ void DeferredLightPixelMain(
 			0.5f,
 			NativeShadowTermsForBuffer);
 		const float NativeShadowVisibilityForBuffer = saturate(NativeShadowTermsForBuffer.SurfaceShadow);
-		const float NativeShadowBufferAmount = bShadowChannelOnly
+		// [DeferredToon] Unmatched receivers must not export native occlusion even
+		// when their Lighting Channel matches. Facing/diffuse remain independent.
+		const float NativeShadowBufferAmount = bShadowChannelOnly || !bShadowReceiverChannelMatch
 			? 0.0f
 			: (1.0f - NativeShadowVisibilityForBuffer) * saturate(ShadowLightMask);
 		const float ShadowChannelBufferAmount = bShadowChannelOnly
@@ -715,7 +779,19 @@ void DeferredLightPixelMain(
 		ShadowContribution += NativeShadowBufferAmount;
 		LightingContribution.a += ShadowChannelBufferAmount;
 	#endif
-		float4 Radiance = GetDynamicLighting(DerivedParams.TranslatedWorldPosition, DerivedParams.CameraVector, ScreenSpaceData.GBuffer, ScreenSpaceData.AmbientOcclusion, LightData, LightAttenuationForComposite, Dither, uint2(InputParams.PixelPos), SurfaceShadow);
+		// [DeferredToon] Reuse the native split evaluation, rather than evaluating
+        // shadowed material lighting a second time only for the export.
+        const FDeferredLightingSplit VisibleLighting = GetDynamicLightingSplit(DerivedParams.TranslatedWorldPosition, DerivedParams.CameraVector, ScreenSpaceData.GBuffer, ScreenSpaceData.AmbientOcclusion, LightData, LightAttenuationForComposite, Dither, uint2(InputParams.PixelPos), SurfaceShadow);
+        float4 Radiance = VisibleLighting.DiffuseLighting + VisibleLighting.SpecularLighting;
+    #if LIGHTING_SHADOW_BUFFER_OUTPUT
+        if (bLightingChannelMatch)
+        {
+            const float3 ReferenceResponse = GetDeferredToonEffectiveResponse(DerivedParams.TranslatedWorldPosition,
+                DerivedParams.CameraVector, ScreenSpaceData.GBuffer, LightData,
+                LightAttenuationForComposite, Dither, uint2(InputParams.PixelPos));
+            EffectiveLightContribution = float4(VisibleLighting.DiffuseLighting.rgb, Luminance(ReferenceResponse));
+        }
+    #endif
 		OutColor += Radiance;
 		// [ShadowChannelPrototype] Apply a direct subtractive fallback from native
 		// shadow visibility when the separated buffer path is unavailable.
@@ -792,11 +868,14 @@ void DeferredLightPixelMain(
 	LightingContribution.rgb *= GetExposure();
 	// [DeferredToon] SpecularContribution is pre-exposed in its own MRT.
 	SpecularContribution.rgb *= GetExposure();
+	// [DeferredToon] All four channels are radiometric; decode once in the volume.
+	EffectiveLightContribution *= GetExposure();
 	if (bWriteLightingShadowBuffers == 0)
 	{
 		LightingContribution = 0;
 		ShadowContribution = 0;
 		SpecularContribution = 0;
+	EffectiveLightContribution = 0; // [DeferredToon] Initialize every permutation / disabled write.
 	}
 #endif
 #if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED 
@@ -861,6 +940,8 @@ void DeferredLightPixelMain(
 	// specular MRT as opaque permutations. Without this declaration the body
 	// below fails global shader compilation when USE_HAIR_LIGHTING is enabled.
 	, out float4 SpecularContribution : SV_Target3
+	// [DeferredToon] RGB native shadowed diffuse; A unit-white diffuse luminance.
+	, out float4 EffectiveLightContribution : SV_Target4
 #endif
 	)
 {
@@ -871,6 +952,7 @@ void DeferredLightPixelMain(
 	LightingContribution = 0;
 	ShadowContribution = 0;
 	SpecularContribution = 0;
+	EffectiveLightContribution = 0; // [DeferredToon] Initialize every permutation / disabled write.
 #endif
 
 	const uint2 InCoord = uint2(SVPos.xy);
@@ -1010,7 +1092,9 @@ void DeferredLightPixelMain(
 #endif
 
 	float SurfaceShadow = 1.0f;
-	const float4 Radiance = GetDynamicLighting(TranslatedWorldPosition, CameraVector, HairScreenSpaceData.GBuffer, HairScreenSpaceData.AmbientOcclusion, LightData, LightAttenuation, Dither, PixelCoord, SurfaceShadow);
+	// [DeferredToon] Reuse native hair split result; shadow-only lights do not add energy.
+    const FDeferredLightingSplit VisibleHairLighting = GetDynamicLightingSplit(TranslatedWorldPosition, CameraVector, HairScreenSpaceData.GBuffer, HairScreenSpaceData.AmbientOcclusion, LightData, LightAttenuation, Dither, PixelCoord, SurfaceShadow);
+    const float4 Radiance = VisibleHairLighting.DiffuseLighting + VisibleHairLighting.SpecularLighting;
 	const float  Attenuation = ComputeLightProfileMultiplier(TranslatedWorldPosition, GetDeferredLightTranslatedWorldPosition(), -DeferredLightUniforms.Direction, DeferredLightUniforms.Tangent, DeferredLightUniforms.IESAtlasIndex);
 	const float3 AtmosphericTransmittance = GetAtmosphereAndCloudAttenuation(GetStableTranslatedLargeWorldPosition(ScreenPosition, Sample.Depth), UV);
 
@@ -1022,8 +1106,20 @@ void DeferredLightPixelMain(
 	// [LightingShadowBuffer] Hair direct lighting keeps atmospheric/profile and
 	// coverage response; occlusion remains positive and range-limited.
 	const float HairLightingScale = Attenuation * LocalCoverage;
+    // [DeferredToon] Hair coverage/profile/transmittance must scale both exports.
+    if (bHairLightingChannelMatch)
+    {
+        const float3 ReferenceResponse = GetDeferredToonEffectiveResponse(TranslatedWorldPosition, CameraVector,
+            HairScreenSpaceData.GBuffer, LightData, bHairShadowReceiverChannelMatch ? LightAttenuation : 1.0f,
+            Dither, PixelCoord) * AtmosphericTransmittance * HairLightingScale;
+        EffectiveLightContribution = float4(VisibleHairLighting.DiffuseLighting.rgb * AtmosphericTransmittance * HairLightingScale,
+            Luminance(ReferenceResponse)) * GetExposure();
+    }
 	LightingContribution = float4(AtmosphericTransmittance * UnshadowedHairLighting.DiffuseLighting.rgb * HairLightingScale * GetExposure(), 0.0f);
 	SpecularContribution = float4(AtmosphericTransmittance * UnshadowedHairLighting.SpecularLighting.rgb * HairLightingScale * GetExposure(), 0.0f);
+	// [DeferredToon] Keep the packed semantic initialized in hair permutations too.
+	SpecularContribution.a = GetDeferredToonFacing(
+		HairScreenSpaceData.GBuffer.WorldNormal, HairLightDirection, HairLightMask, bHairLightingChannelMatch);
 	// [LightingShadowBuffer] Match the standard shadow-only weighting while
 	// keeping ordinary hair shadow contributions at weight one.
 	const float HairShadowReceiverFilter = bHairShadowChannelOnly ? (bHairShadowReceiverChannelMatch ? 1.0f : 0.0f) : 1.0f;
@@ -1061,7 +1157,8 @@ void DeferredLightPixelMain(
 	// native occlusion is the scalar ShadowBuffer value, while the matching
 	// Shadow Channel is accumulated in LightingBuffer alpha. Both are box-mapped
 	// later, so their overlap is resolved in one place.
-	const float NativeHairShadowAmount = bHairShadowChannelOnly
+	// [DeferredToon] Keep hair export consistent with the receiver-channel policy.
+	const float NativeHairShadowAmount = bHairShadowChannelOnly || !bHairShadowReceiverChannelMatch
 		? 0.0f
 		: (1.0f - NativeHairShadowVisibility) * saturate(HairLightMask) * LocalCoverage;
 	const float HairShadowChannelAmount = bHairShadowChannelOnly
@@ -1074,6 +1171,8 @@ void DeferredLightPixelMain(
 	{
 		LightingContribution = 0;
 		ShadowContribution = 0;
+		SpecularContribution = 0;
+	EffectiveLightContribution = 0; // [DeferredToon] Initialize every permutation / disabled write.
 	}
 #endif
 }

@@ -3335,7 +3335,7 @@ void FDeferredShadingSceneRenderer::Render(FRDGBuilder& GraphBuilder, const FSce
 			// [DeferredToon] SpecularBuffer is an ELoad MRT just like LightingBuffer
 			// and ShadowBuffer; initialize it every view or DebugView 18 can read
 			// pooled/stale rows as horizontal corruption.
-			if (IsLightingShadowBuffersEnabled() && SceneTextures.LightingBuffer && SceneTextures.ShadowBuffer && SceneTextures.SpecularBuffer)
+			if (IsLightingShadowBuffersEnabled() && SceneTextures.LightingBuffer && SceneTextures.ShadowBuffer && SceneTextures.SpecularBuffer && SceneTextures.EffectiveLightBuffer)
 			{
 				bool bClearedWholeBuffer = false;
 				for (const FViewInfo& View : Views)
@@ -3345,6 +3345,8 @@ void FDeferredShadingSceneRenderer::Render(FRDGBuilder& GraphBuilder, const FSce
 						AddClearRenderTargetPass(GraphBuilder, SceneTextures.LightingBuffer, FLinearColor::Transparent);
 						AddClearRenderTargetPass(GraphBuilder, SceneTextures.ShadowBuffer, FLinearColor::Transparent);
 						AddClearRenderTargetPass(GraphBuilder, SceneTextures.SpecularBuffer, FLinearColor::Transparent);
+						// [DeferredToon] Initialize the effective input for full and partial views.
+						AddClearRenderTargetPass(GraphBuilder, SceneTextures.EffectiveLightBuffer, FLinearColor::Transparent);
 						bClearedWholeBuffer = true;
 					}
 					else
@@ -3354,6 +3356,8 @@ void FDeferredShadingSceneRenderer::Render(FRDGBuilder& GraphBuilder, const FSce
 						AddClearRenderTargetPass(GraphBuilder, SceneTextures.LightingBuffer, FLinearColor::Transparent, View.ViewRect);
 						AddClearRenderTargetPass(GraphBuilder, SceneTextures.ShadowBuffer, FLinearColor::Transparent, View.ViewRect);
 						AddClearRenderTargetPass(GraphBuilder, SceneTextures.SpecularBuffer, FLinearColor::Transparent, View.ViewRect);
+						// [DeferredToon] Initialize the effective input for full and partial views.
+						AddClearRenderTargetPass(GraphBuilder, SceneTextures.EffectiveLightBuffer, FLinearColor::Transparent, View.ViewRect);
 					}
 				}
 			}
