@@ -27,7 +27,8 @@ private:
 
 #if WITH_EDITORONLY_DATA
     /** Editor-only bounds visualization; it is disabled from all runtime rendering passes. */
-    UPROPERTY(VisibleAnywhere, Transient, Category="Deferred Toon Volume", meta=(AllowPrivateAccess="true"))
+    // [DeferredToon] Internal visualization only; do not expose its physics/render settings in actor details.
+    UPROPERTY(Transient)
     TObjectPtr<UBoxComponent> VolumeBounds;
 #endif
 };

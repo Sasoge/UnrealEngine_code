@@ -2,6 +2,8 @@
 
 日期：2026-10-15。基于有效直接漫反射的既有输入，不改变逐灯积分、阴影通道或 Pass 顺序。
 
+2026-10-16 界面名称整理：Light Bands 分类现显示为 **Toon | Light Bands**，Apply Four Light Bands 按钮改为 **Reset to Four Bands**，Use Two Band Compatibility 改为 **Use Two Bands**；Min Response / Value 显示为 **Starts At / Level**。下文中的程序字段名及计算不变，详见[操作面板说明](deferred-toon-authoring-ui.md)。
+
 ## 开始使用
 
 1. 选中 `DeferredToonVolumeComponent`，Output Mode 选择 **Direct Light Grade** 或 **Toon Recompose**。

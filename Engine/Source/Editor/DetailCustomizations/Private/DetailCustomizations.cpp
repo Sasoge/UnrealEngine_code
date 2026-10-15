@@ -52,6 +52,7 @@
 #include "DateTimeStructCustomization.h"
 #include "DebugCameraControllerSettingsCustomization.h"
 #include "DecalComponentDetails.h"
+#include "DeferredToonVolumeDetails.h" // [DeferredToon] Task-oriented authoring layout.
 #include "Delegates/Delegate.h"
 #include "DeviceProfileDetails.h"
 #include "DialogueStructsCustomizations.h"
@@ -395,6 +396,8 @@ void FDetailCustomizationsModule::RegisterObjectCustomizations()
 	RegisterCustomClassLayout("Actor", FOnGetDetailCustomizationInstance::CreateStatic(&FActorDetails::MakeInstance));
 	RegisterCustomClassLayout("ActorComponent", FOnGetDetailCustomizationInstance::CreateStatic(&FActorComponentDetails::MakeInstance));
 	RegisterCustomClassLayout("SceneComponent", FOnGetDetailCustomizationInstance::CreateStatic(&FSceneComponentDetails::MakeInstance));
+	// [DeferredToon] Tracked by the module's normal shutdown/unregistration path.
+	RegisterCustomClassLayout("DeferredToonVolumeComponent", FOnGetDetailCustomizationInstance::CreateStatic(&FDeferredToonVolumeDetails::MakeInstance));
 	RegisterCustomClassLayout("PrimitiveComponent", FOnGetDetailCustomizationInstance::CreateStatic(&FPrimitiveComponentDetails::MakeInstance));
 	RegisterCustomClassLayout("StaticMeshComponent", FOnGetDetailCustomizationInstance::CreateStatic(&FStaticMeshComponentDetails::MakeInstance));
 	RegisterCustomClassLayout("InstancedStaticMeshComponent", FOnGetDetailCustomizationInstance::CreateStatic(&FInstancedStaticMeshComponentDetails::MakeInstance));
