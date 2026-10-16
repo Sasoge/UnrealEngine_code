@@ -69,14 +69,21 @@ void FDeferredToonVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBu
         {TEXT("Toon Bands"), FText::FromString(bChinese ? TEXT("风格化 | 明暗分档") : TEXT("Toon | Light Bands")), false},
         {TEXT("Toon Palette"), FText::FromString(bChinese ? TEXT("风格化 | 配色") : TEXT("Toon | Colors")), false},
         {TEXT("Toon Indirect"), FText::FromString(bChinese ? TEXT("风格化 | 间接漫反射") : TEXT("Toon | Indirect Diffuse")), true}, // [DeferredToon]
-        {TEXT("Toon Indirect AO"), FText::FromString(bChinese ? TEXT("风格化 | 天光遮蔽") : TEXT("Toon | Sky Occlusion")), true}, // [DeferredToon]
-        {TEXT("Toon Lumen AO"), FText::FromString(bChinese ? TEXT("风格化 | Lumen 短程 AO") : TEXT("Toon | Lumen Short Range AO")), true}, // [DeferredToon]
+        {TEXT("Toon Occlusion"), FText::FromString(bChinese ? TEXT("风格化 | 间接漫反射遮蔽") : TEXT("Toon | Indirect Diffuse Occlusion")), true}, // [DeferredToon]
         {TEXT("Toon Textures"), FText::FromString(bChinese ? TEXT("风格化 | 纹理") : TEXT("Toon | Textures")), true},
         {TEXT("Toon Bounds"), FText::FromString(bChinese ? TEXT("风格化 | 盒体范围与混合") : TEXT("Toon | Box & Blending")), true},
         {TEXT("Toon Debug"), FText::FromString(bChinese ? TEXT("风格化 | 调试") : TEXT("Toon | Debug")), true},
         {TEXT("Toon Advanced"), FText::FromString(bChinese ? TEXT("风格化 | 高级设置") : TEXT("Toon | Advanced")), true},
         {TEXT("Toon Style Lab"), FText::FromString(bChinese ? TEXT("风格化 | 实验分层") : TEXT("Toon | Experimental Layers")), true},
     };
+    // [DeferredToon] Source preview reads real per-pixel provider validity, not project defaults.
+    DetailBuilder.EditCategory(TEXT("Toon Occlusion")).AddCustomRow(FText::FromString(TEXT("AO Source 来源")))
+    .WholeRowContent()
+    [
+        SNew(STextBlock).AutoWrapText(true).Text(FText::FromString(bChinese
+            ? TEXT("自动选择有效来源：Lumen 短程 AO / 普通天光综合遮蔽。预览 33 查看汇总，36 查看来源（青色 Lumen、橙色天光、黑色无数据）。旧版分路参数保留在高级设置中。")
+            : TEXT("Auto source: Lumen short-range AO / dynamic sky combined occlusion. View 33 previews the aggregate; 36 shows its source (cyan Lumen, orange sky, black unavailable). Older separate settings remain under Advanced.")))
+    ];
     TArray<TPair<FName, FText>> SectionLabels;
     SectionLabels.Emplace(TEXT("Toon Language"), FText::FromString(TEXT("界面语言 / Language")));
     for (int32 Index = 0; Index < UE_ARRAY_COUNT(Sections); ++Index)

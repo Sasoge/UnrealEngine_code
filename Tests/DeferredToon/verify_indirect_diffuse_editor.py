@@ -257,6 +257,77 @@ if '-toonlumenshortao' in unreal.SystemLibrary.get_command_line().lower():
         ('sky-override', [lambda: apply('set_override_lumen_short_range_ao', True)]),
     ]
 
+
+# [DeferredToon] Unified provider selection and standalone controls, no asset saves.
+if '-toonunifiedao' in unreal.SystemLibrary.get_command_line().lower():
+    out = Path(unreal.Paths.project_saved_dir()) / 'Automation/DeferredToonUnifiedAO'
+    out.mkdir(parents=True, exist_ok=True)
+    for actor in actors:
+        for c in actor.get_components_by_class(unreal.SkyLightComponent):
+            c.set_real_time_capture(False)
+            c.set_editor_property('source_type', unreal.SkyLightSourceType.SLS_SPECIFIED_CUBEMAP)
+            c.set_cubemap(unreal.load_asset('/Engine/MapTemplates/Sky/DaylightAmbientCubemap'))
+    for cmd in ['r.Lumen.ScreenProbeGather.ShortRangeAO 1',
+                'r.Lumen.ScreenProbeGather.ShortRangeAO.ApplyDuringIntegration 0', 'r.DistanceFieldAO 1']:
+        command(cmd)
+    Mode = unreal.DeferredToonIndirectOcclusionMode
+    def mode(value):
+        apply('set_indirect_occlusion_mode', value)
+    def d(value):
+        debug(unreal.DeferredToonDebugView.CONSOLE_GLOBAL)
+        command('r.Toon.DeferredVolumes.DebugView ' + str(value))
+    def strength(value):
+        apply('set_indirect_occlusion_strength', value)
+    def lumen_again():
+        command('r.Lumen.DiffuseIndirect.Allow 1')
+        for actor in actors:
+            if isinstance(actor, unreal.PostProcessVolume):
+                st = actor.get_editor_property('settings')
+                st.set_editor_property('dynamic_global_illumination_method', unreal.DynamicGlobalIlluminationMethod.LUMEN)
+                actor.set_editor_property('settings', st)
+    def legacy_lumen():
+        apply('set_override_lumen_short_range_ao', True)
+        apply('set_lumen_short_range_ao_strength', .3)
+        for v in volumes:
+            assert v.get_editor_property('indirect_occlusion_mode') == Mode.LEGACY
+    def legacy_sky():
+        apply('set_override_sky_occlusion', True)
+        apply('set_sky_occlusion_strength', .3)
+        apply('set_sky_occlusion_color_replace_weight', 0)
+    phases = [
+        ('lumen-native', [lambda: d(0), lambda: mode(Mode.NATIVE), lambda: apply('set_override_indirect_diffuse', False)]),
+        ('lumen-neutral', [lambda: mode(Mode.UNIFIED), lambda: strength(1)]),
+        ('lumen-removed', [lambda: strength(0)]),
+        ('lumen-half', [lambda: strength(.5)]),
+        ('lumen-summary', [lambda: d(33)]),
+        ('lumen-raw', [lambda: d(30)]),
+        ('lumen-before-summary', [lambda: d(34)]),
+        ('lumen-before-raw', [lambda: d(31)]),
+        ('lumen-source', [lambda: d(36)]),
+        ('lumen-validity', [lambda: d(35)]),
+        ('lumen-legacy', [neutral, legacy_lumen, lambda: d(0)]),
+        ('lumen-unified-match', [lambda: mode(Mode.UNIFIED), lambda: strength(.3)]),
+        ('sky-summary', [sky_only, lambda: d(33)]),
+        ('sky-raw', [lambda: d(28)]),
+        ('sky-source', [lambda: d(36)]),
+        ('sky-before-summary', [lambda: d(34)]),
+        ('sky-before-raw', [lambda: d(27)]),
+        ('sky-native', [lambda: d(0), lambda: mode(Mode.NATIVE), lambda: apply('set_override_indirect_diffuse', False)]),
+        ('sky-neutral', [lambda: mode(Mode.UNIFIED), lambda: strength(1)]),
+        ('sky-removed', [lambda: strength(0)]),
+        ('sky-legacy', [neutral, legacy_sky]),
+        ('sky-unified-match', [lambda: mode(Mode.UNIFIED), lambda: strength(.3)]),
+        ('sky-weight-native', [lambda: mode(Mode.NATIVE), lambda: apply('set_override_indirect_diffuse', False), lambda: apply('set_other_lighting_weight', .3)]),
+        ('sky-weight-neutral', [lambda: mode(Mode.UNIFIED), lambda: strength(1)]),
+        ('missing-validity', [lambda: sky_visibility(False), lambda: d(35)]),
+        ('missing-source', [lambda: d(36)]),
+        ('missing-native', [lambda: d(0), lambda: mode(Mode.NATIVE)]),
+        ('missing-unified', [lambda: mode(Mode.UNIFIED), lambda: strength(0)]),
+        ('lumen-restored-source', [lambda: sky_visibility(True), lumen_again, lambda: d(36)]),
+        ('lumen-summary-tsr', [lambda: d(33), lambda: command('r.ScreenPercentage 67')]),
+        ('lumen-summary-exposure', [lambda: command('r.ScreenPercentage 100'), lambda: command('r.EyeAdaptation.PreExposureOverride 4')]),
+    ]
+
 phase = 0
 frame = 0
 capture = None

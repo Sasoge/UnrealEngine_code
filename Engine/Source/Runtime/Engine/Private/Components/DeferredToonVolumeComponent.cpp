@@ -8,6 +8,7 @@
 #include "SceneInterface.h"
 #include "UObject/UnrealType.h"
 #include "RenderCommandFence.h"
+#include "Serialization/CustomVersion.h" // [DeferredToon]
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(DeferredToonVolumeComponent)
 
@@ -47,10 +48,30 @@ UDeferredToonVolumeComponent::UDeferredToonVolumeComponent(const FObjectInitiali
     Mobility = EComponentMobility::Movable;
 }
 
+namespace DeferredToonOcclusionVersion
+{
+    // [DeferredToon] Local component version; do not modify engine-wide asset versions.
+    const FGuid GUID(0x1A96C807, 0x46E1495C, 0x93F82A06, 0xC45D3771);
+    constexpr int32 UnifiedControls = 1;
+    FCustomVersionRegistration Registration(GUID, UnifiedControls, TEXT("DeferredToonOcclusion"));
+}
+
+void UDeferredToonVolumeComponent::Serialize(FArchive& Ar)
+{
+    Ar.UsingCustomVersion(DeferredToonOcclusionVersion::GUID);
+    Super::Serialize(Ar);
+}
+
 // [DeferredToon] Preserve old asset IDs but retire the incorrect diffuse reconstruction.
 void UDeferredToonVolumeComponent::PostLoad()
 {
     Super::PostLoad();
+    // [DeferredToon] Unequal per-path settings cannot be losslessly merged into one slider.
+    if (GetLinkerCustomVersion(DeferredToonOcclusionVersion::GUID) < DeferredToonOcclusionVersion::UnifiedControls
+        && (bOverrideSkyOcclusion || bOverrideLumenShortRangeAO))
+    {
+        IndirectOcclusionMode = EDeferredToonIndirectOcclusionMode::Legacy;
+    }
     if (OutputMode == EDeferredToonVolumeOutputMode::RecomposeDiffuse)
     {
         OutputMode = EDeferredToonVolumeOutputMode::DirectLightGrade;
@@ -240,14 +261,17 @@ void UDeferredToonVolumeComponent::SetOverrideIndirectDiffuse(bool NewValue) { D
 void UDeferredToonVolumeComponent::SetIndirectDiffuseIntensity(float NewValue) { DTOON_SET(IndirectDiffuseIntensity, FMath::Max(NewValue, 0.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetIndirectDiffuseColor(FLinearColor NewValue) { DTOON_SET(IndirectDiffuseColor, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetIndirectDiffuseColorReplaceWeight(float NewValue) { DTOON_SET(IndirectDiffuseColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+// [DeferredToon] Unified entry point; old setters below explicitly select compatibility mode.
+void UDeferredToonVolumeComponent::SetIndirectOcclusionMode(EDeferredToonIndirectOcclusionMode NewValue) { DTOON_SET(IndirectOcclusionMode, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetIndirectOcclusionStrength(float NewValue) { DTOON_SET(IndirectOcclusionStrength, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 // [DeferredToon] Sky occlusion controls.
-void UDeferredToonVolumeComponent::SetOverrideSkyOcclusion(bool NewValue) { DTOON_SET(bOverrideSkyOcclusion, NewValue, MarkRenderStateDirty()); }
-void UDeferredToonVolumeComponent::SetSkyOcclusionStrength(float NewValue) { DTOON_SET(SkyOcclusionStrength, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetOverrideSkyOcclusion(bool NewValue) { SetIndirectOcclusionMode(EDeferredToonIndirectOcclusionMode::Legacy); DTOON_SET(bOverrideSkyOcclusion, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetSkyOcclusionStrength(float NewValue) { SetIndirectOcclusionMode(EDeferredToonIndirectOcclusionMode::Legacy); DTOON_SET(SkyOcclusionStrength, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 // [DeferredToon] Update renderer on Blueprint/runtime authoring changes.
-void UDeferredToonVolumeComponent::SetOverrideLumenShortRangeAO(bool NewValue) { DTOON_SET(bOverrideLumenShortRangeAO, NewValue, MarkRenderStateDirty()); }
-void UDeferredToonVolumeComponent::SetLumenShortRangeAOStrength(float NewValue) { DTOON_SET(LumenShortRangeAOStrength, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
-void UDeferredToonVolumeComponent::SetSkyOcclusionColor(FLinearColor NewValue) { DTOON_SET(SkyOcclusionColor, NewValue, MarkRenderStateDirty()); }
-void UDeferredToonVolumeComponent::SetSkyOcclusionColorReplaceWeight(float NewValue) { DTOON_SET(SkyOcclusionColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetOverrideLumenShortRangeAO(bool NewValue) { SetIndirectOcclusionMode(EDeferredToonIndirectOcclusionMode::Legacy); DTOON_SET(bOverrideLumenShortRangeAO, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetLumenShortRangeAOStrength(float NewValue) { SetIndirectOcclusionMode(EDeferredToonIndirectOcclusionMode::Legacy); DTOON_SET(LumenShortRangeAOStrength, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetSkyOcclusionColor(FLinearColor NewValue) { SetIndirectOcclusionMode(EDeferredToonIndirectOcclusionMode::Legacy); DTOON_SET(SkyOcclusionColor, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetSkyOcclusionColorReplaceWeight(float NewValue) { SetIndirectOcclusionMode(EDeferredToonIndirectOcclusionMode::Legacy); DTOON_SET(SkyOcclusionColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTexture(UTexture2D* NewValue) { DTOON_SET(ShadowTexture, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTextureWeight(float NewValue) { DTOON_SET(ShadowTextureWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTextureTiling(FVector2D NewValue) { DTOON_SET(ShadowTextureTiling, NewValue, MarkRenderStateDirty()); }

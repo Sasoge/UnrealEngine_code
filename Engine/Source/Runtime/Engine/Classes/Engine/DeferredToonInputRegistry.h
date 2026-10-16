@@ -29,6 +29,8 @@ enum class EDeferredToonInputId : uint16
 	IndirectDiffuse = 15, // [DeferredToon] Scene-linear material-weighted diffuse.
 	SkyDiffuseBeforeAO = 16, // [DeferredToon] RGB, decoded from pre-exposure.
 	SkyOcclusion = 17, // [DeferredToon] Combined sky visibility, white = unoccluded.
+	IndirectOcclusion = 18, // [DeferredToon] Automatically resolved independent diffuse occlusion.
+	IndirectDiffuseBeforeOcclusion = 19, // [DeferredToon] Actual selected pre-occlusion RGB.
 
 	// [DeferredToon] Retain retired IDs so old assets can resolve to a
 	// documented fallback instead of silently changing their meaning.
@@ -47,6 +49,7 @@ enum class EDeferredToonInputSource : uint8
 	EffectiveLightBuffer, // [DeferredToon]
 	IndirectDiffuseBuffer, // [DeferredToon]
 	SkyDiffuseBeforeAOBuffer, // [DeferredToon] Two semantic inputs share one RGBA16F resource.
+	IndirectOcclusionBuffers, // [DeferredToon] Per-pixel selection over both existing providers.
 };
 
 enum class EDeferredToonInputChannel : uint8

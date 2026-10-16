@@ -10,7 +10,7 @@ namespace DeferredToonInputRegistryPrivate
 		static TArray<FDeferredToonInputDescriptor> Descriptors = []
 		{
 			TArray<FDeferredToonInputDescriptor> Result;
-			Result.Reserve(18); // [DeferredToon] Built-in semantics plus retired descriptor.
+			Result.Reserve(20); // [DeferredToon] Built-in semantics plus retired descriptor.
 
 			auto Add = [&Result](
 				EDeferredToonInputId Id,
@@ -64,6 +64,9 @@ namespace DeferredToonInputRegistryPrivate
 			// [DeferredToon] Shared provider, distinct semantic decoding and neutral fallbacks.
 			Add(EDeferredToonInputId::SkyDiffuseBeforeAO, TEXT("SkyDiffuseBeforeAO"), EDeferredToonInputSource::SkyDiffuseBeforeAOBuffer, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0, 0, 0, 0), true);
 			Add(EDeferredToonInputId::SkyOcclusion, TEXT("SkyOcclusion"), EDeferredToonInputSource::SkyDiffuseBeforeAOBuffer, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Linear, FVector4f(1, 1, 1, 1), true);
+            // [DeferredToon] Source choice is deferred to the shader, including pixel validity.
+            Add(EDeferredToonInputId::IndirectOcclusion, TEXT("IndirectOcclusion"), EDeferredToonInputSource::IndirectOcclusionBuffers, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Linear, FVector4f(1, 1, 1, 1), true);
+            Add(EDeferredToonInputId::IndirectDiffuseBeforeOcclusion, TEXT("IndirectDiffuseBeforeOcclusion"), EDeferredToonInputSource::IndirectOcclusionBuffers, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0, 0, 0, 0), true);
 			Add(EDeferredToonInputId::DeprecatedShadowBuffer, TEXT("DeprecatedShadowBuffer"), EDeferredToonInputSource::ShadowBuffer, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Linear, FVector4f(1.0f, 1.0f, 1.0f, 1.0f), false, true, EDeferredToonInputId::NativeShadow);
 			return Result;
 		}();

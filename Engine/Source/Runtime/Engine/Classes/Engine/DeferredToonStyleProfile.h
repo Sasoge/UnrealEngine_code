@@ -30,6 +30,8 @@ enum class EDeferredToonStyleInputId : uint8
     IndirectDiffuse = 15 UMETA(DisplayName="Indirect Diffuse"), // [DeferredToon]
     SkyDiffuseBeforeAO = 16 UMETA(DisplayName="Sky Diffuse Before AO"), // [DeferredToon]
     SkyOcclusion = 17 UMETA(DisplayName="Sky Combined AO"), // [DeferredToon]
+    IndirectOcclusion = 18 UMETA(DisplayName="Indirect Diffuse Occlusion (Automatic)"), // [DeferredToon]
+    IndirectDiffuseBeforeOcclusion = 19 UMETA(DisplayName="Indirect Diffuse Before Occlusion (Automatic)"), // [DeferredToon]
     DeprecatedShadowBuffer = 100 UMETA(DisplayName="Deprecated Shadow Buffer"),
 };
 

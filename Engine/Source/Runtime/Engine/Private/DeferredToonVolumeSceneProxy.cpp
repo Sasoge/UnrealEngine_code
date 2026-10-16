@@ -45,6 +45,18 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     SkyOcclusionColorReplaceWeight = FMath::Clamp(Component->SkyOcclusionColorReplaceWeight, 0.0f, 1.0f);
     bOverrideLumenShortRangeAO = Component->bOverrideLumenShortRangeAO; // [DeferredToon]
     LumenShortRangeAOStrength = FMath::Clamp(Component->LumenShortRangeAOStrength, 0.0f, 1.0f);
+    // [DeferredToon] Resolve the single control into provider settings, once per proxy update.
+    bUnifiedIndirectOcclusion = Component->IndirectOcclusionMode == EDeferredToonIndirectOcclusionMode::Unified;
+    if (bUnifiedIndirectOcclusion)
+    {
+        bOverrideSkyOcclusion = bOverrideLumenShortRangeAO = true;
+        SkyOcclusionStrength = LumenShortRangeAOStrength = FMath::Clamp(Component->IndirectOcclusionStrength, 0.0f, 1.0f);
+        SkyOcclusionColorReplaceWeight = 0.0f; // No legacy tint leakage into unified mode.
+    }
+    else if (Component->IndirectOcclusionMode != EDeferredToonIndirectOcclusionMode::Legacy)
+    {
+        bOverrideSkyOcclusion = bOverrideLumenShortRangeAO = false;
+    }
     // [DeferredToon] Resolve authored bands once per proxy update, not per pixel.
     static_assert(MaxLightBands == UDeferredToonVolumeComponent::MaxLightBands);
     for (int32 Index = 0; Index < MaxLightBands; ++Index)

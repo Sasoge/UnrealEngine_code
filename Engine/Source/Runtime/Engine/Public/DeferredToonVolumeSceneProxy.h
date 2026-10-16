@@ -66,6 +66,7 @@ public:
     FLinearColor SkyOcclusionColor = FLinearColor::Black;
     float SkyOcclusionColorReplaceWeight = 0.0f;
     // [DeferredToon] Lumen short-range diffuse AO, independent from sky AO.
+    bool bUnifiedIndirectOcclusion = false; // [DeferredToon] Can operate without indirect color grading.
     bool bOverrideLumenShortRangeAO = false;
     float LumenShortRangeAOStrength = 1.0f;
     float ShadowTextureWeight = 1.0f;
