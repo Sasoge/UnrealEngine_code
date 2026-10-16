@@ -81,6 +81,9 @@ enum class EDeferredToonDebugView : uint8
     EffectiveLightResponse = 23 UMETA(DisplayName="23 - Effective Light Response"),
     // [DeferredToon] Display discrete light level; unlike shadow masks, 1 means brightest.
     LightBandValue = 24 UMETA(DisplayName="24 - Selected Light Band (0 Dark / 1 Light)"),
+    // [DeferredToon] Append only: preserve saved debug IDs.
+    IndirectDiffuse = 25 UMETA(DisplayName="25 - Indirect Diffuse"),
+    IndirectDiffuseCoverage = 26 UMETA(DisplayName="26 - Indirect Diffuse Availability"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 
@@ -164,8 +167,22 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Palette", meta=(ClampMin="0.0", ClampMax="1.0", EditConditionHides, DisplayName="Shadow Color Replacement", DisplayPriority="4", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", ToolTip="0 tints original direct diffuse; 1 replaces it with the target color, even in fully dark regions. Intermediate bands interpolate the shadow/light replacement amounts by their Level."))
     float ShadowColorReplaceWeight = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Output", meta=(ClampMin="0.0", ClampMax="1.0", EditConditionHides, DisplayName="Keep Other Lighting", DisplayPriority="3", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", ToolTip="0 keeps only processed direct diffuse; 1 also retains the original scene residual (including indirect light and specular). This can change the visible palette colors."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Output", meta=(ClampMin="0.0", ClampMax="1.0", EditConditionHides, DisplayName="Keep Other Lighting", DisplayPriority="3", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", ToolTip="0 keeps only processed direct diffuse; 1 also retains the original scene residual (including indirect light and specular). With Adjust Indirect Diffuse enabled, extracted indirect has separate controls. This can change the visible palette colors."))
     float OtherLightingWeight = 1.0f;
+
+    // [DeferredToon] Opt-in split preserves legacy residual weights in existing assets.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Adjust Indirect Diffuse", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Extract supported Lumen or dynamic sky diffuse from Other Lighting and control it independently. Does not change direct-light bands. Unsupported pixels retain the old composition."))
+    bool bOverrideIndirectDiffuse = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Intensity", ClampMin="0.0", UIMax="4.0", EditCondition="bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="1 preserves native indirect intensity; 0 removes the extracted indirect layer."))
+    float IndirectDiffuseIntensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Color", HideAlphaChannel, EditCondition="bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Scene-linear tint or replacement color. White is neutral when Color Replacement is zero. Final UE exposure and tonemapping still apply."))
+    FLinearColor IndirectDiffuseColor = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Color Replacement", ClampMin="0.0", ClampMax="1.0", EditCondition="bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="0 multiplies native indirect by Color; 1 replaces it with Color, including zero-GI surfaces. Material Base Color Influence affects replacement only."))
+    float IndirectDiffuseColorReplaceWeight = 0.0f;
+
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Textures", meta=(DisplayName="Shadow Texture (2D)", DisplayPriority="0", EditCondition="(OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade || OutputMode == EDeferredToonVolumeOutputMode::ToonRecompose) || OutputMode == EDeferredToonVolumeOutputMode::NativeComposite", EditConditionHides, ToolTip="Optional box-local triplanar texture. Each band controls its texture influence; in two-band mode it affects the shadow region."))
     TObjectPtr<UTexture2D> ShadowTexture = nullptr;
@@ -228,6 +245,11 @@ public:
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetLitColorReplaceWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowColorReplaceWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOtherLightingWeight(float NewValue);
+    // [DeferredToon] Runtime setters invalidate the render-thread snapshot.
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOverrideIndirectDiffuse(bool NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseIntensity(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseColor(FLinearColor NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseColorReplaceWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTexture(UTexture2D* NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTextureWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTextureTiling(FVector2D NewValue);

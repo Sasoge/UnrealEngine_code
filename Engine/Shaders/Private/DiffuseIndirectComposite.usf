@@ -344,6 +344,11 @@ FSubstrateDeferredLighting SubstrateIndirectLighting(
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+// [DeferredToon] Separate from native render targets: dual-source slots are not MRTs.
+#if TOON_EXPORT_INDIRECT_DIFFUSE
+RWTexture2D<float4> ToonIndirectDiffuseOutput;
+#endif
+
 void MainPS(
 	float4 SvPosition : SV_POSITION
 #if DIM_APPLY_DIFFUSE_INDIRECT
@@ -644,6 +649,14 @@ void MainPS(
 
 		// Accumulate lighting into the final buffers
 	#if SUBTRATE_GBUFFER_FORMAT==0
+		// [DeferredToon] Capture actual diffuse after native material/AO and existing
+		// Toon Lumen processing, before reflection mixing. Do not export SSS pixels:
+		// their later spatial diffusion prevents an exact local layer subtraction.
+		#if TOON_EXPORT_INDIRECT_DIFFUSE
+		const bool bToonDiffuseValid = IsValid(Material) && !Material.bNeedsSeparateLightAccumulation;
+		ToonIndirectDiffuseOutput[PixelPos] = bToonDiffuseValid
+			? float4(IndirectLighting.Diffuse, 1.0f) : 0.0f;
+		#endif
 		IndirectLighting.Specular *= GetSSSCheckerboadSpecularScale(PixelPos, Material.bNeedsSeparateLightAccumulation);
 		IndirectLighting.Specular = 0;
 		FLightAccumulator LightAccumulator = (FLightAccumulator)0;

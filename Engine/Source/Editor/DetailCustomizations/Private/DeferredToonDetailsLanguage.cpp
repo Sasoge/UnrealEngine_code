@@ -79,7 +79,12 @@ void Apply(bool bChinese)
         {TEXT("bEnabled"), TEXT("启用风格化盒体"), TEXT("启用或停用此盒体的风格化效果。")},
         {TEXT("OutputMode"), TEXT("输出模式"), TEXT("直接光调色：处理原生有效直接漫反射；独立重组：输出色板与可选材质底色。整体染色与输入层预览用于辅助调试。")},
         {TEXT("BlendWeight"), TEXT("效果强度"), TEXT("0 保留原画面；1 在盒体内部完整应用效果。")},
-        {TEXT("OtherLightingWeight"), TEXT("保留其他光照"), TEXT("0 只输出处理后的直接漫反射；1 保留原画面减去直接漫反射后的其余贡献，包括间接光与高光。这会影响最终看到的色板颜色。")},
+        // [DeferredToon] Keep new authoring controls bilingual.
+        {TEXT("bOverrideIndirectDiffuse"), TEXT("独立调整间接漫反射"), TEXT("从其他光照中分出支持的 Lumen 或动态天光漫反射。不改变直接光档位；不支持的像素沿用原合成。")},
+        {TEXT("IndirectDiffuseIntensity"), TEXT("强度"), TEXT("1 保留原始强度；0 去除已分离的间接漫反射。")},
+        {TEXT("IndirectDiffuseColor"), TEXT("颜色"), TEXT("线性空间乘色或替换色。颜色替换为 0 时白色为中性；最后仍经过 UE 曝光和色调映射。")},
+        {TEXT("IndirectDiffuseColorReplaceWeight"), TEXT("颜色替换"), TEXT("0 对原生间接漫反射乘色；1 替换为指定颜色（包括零间接光表面）。材质底色影响只作用于替换部分。")},
+        {TEXT("OtherLightingWeight"), TEXT("保留其他光照"), TEXT("0 只输出处理后的直接漫反射；1 保留原画面减去直接漫反射后的其余贡献，包括间接光与高光。启用独立调整间接漫反射后，已分离部分改由间接光参数控制。这会影响最终看到的色板颜色。")},
         {TEXT("bUseLightBands"), TEXT("启用多档明暗"), TEXT("支持 2～8 档。关闭或不足两档时使用二分阈值。")},
         {TEXT("EffectiveLightThreshold"), TEXT("二分受光阈值"), TEXT("二分模式的受光分界。多档模式使用每档受光下限；调试视图 14、19、20 仍使用这个二分参考阈值。")},
         {TEXT("LightBands"), TEXT("明暗档位"), TEXT("前 8 项按受光下限排序；下限相同则后项优先。至少两项。数组标题为“受光下限 / 档位值”。")},
@@ -166,6 +171,8 @@ void Apply(bool bChinese)
         {TEXT("EffectiveDirectLight"), TEXT("22 - 有效直接漫反射")},
         {TEXT("EffectiveLightResponse"), TEXT("23 - 有效受光响应")},
         {TEXT("LightBandValue"), TEXT("24 - 所选明暗档位（0 暗 / 1 亮）")},
+        {TEXT("IndirectDiffuse"), TEXT("25 - 间接漫反射")},
+        {TEXT("IndirectDiffuseCoverage"), TEXT("26 - 间接漫反射可用范围")},
         {TEXT("ConsoleGlobal"), TEXT("跟随全局 / 控制台")},
     };
     TranslateEnum(TEXT("/Script/Engine.EDeferredToonDebugView"), Enum1, bChinese);
@@ -191,6 +198,7 @@ void Apply(bool bChinese)
         {TEXT("DirectLightFacing"), TEXT("朝向受光（N·L）")},
         {TEXT("EffectiveDirectLight"), TEXT("有效直接漫反射")},
         {TEXT("EffectiveLightResponse"), TEXT("有效受光响应")},
+        {TEXT("IndirectDiffuse"), TEXT("间接漫反射")},
         {TEXT("DeprecatedShadowBuffer"), TEXT("旧版阴影缓冲（已弃用）")},
     };
     TranslateEnum(TEXT("/Script/Engine.EDeferredToonStyleInputId"), Enum3, bChinese);

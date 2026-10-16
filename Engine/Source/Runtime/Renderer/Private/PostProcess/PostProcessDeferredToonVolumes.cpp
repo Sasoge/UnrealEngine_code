@@ -25,7 +25,7 @@ namespace
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
 		// [DeferredToon] View 20 previews the new independent two-band output mask.
-		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light)."),
+		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light), 25 indirect diffuse (Lumen or dynamic sky), 26 indirect availability."),
 		ECVF_RenderThreadSafe);
 
 	class FDeferredToonVolumePS : public FGlobalShader
@@ -80,6 +80,13 @@ namespace
 			SHADER_PARAMETER(float, LitColorReplaceWeight)
 			SHADER_PARAMETER(float, ShadowColorReplaceWeight)
 			SHADER_PARAMETER(float, OtherLightingWeight)
+			// [DeferredToon] Explicit optional provider; no global scene uniform ABI change.
+			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, IndirectDiffuseTexture)
+			SHADER_PARAMETER(uint32, bIndirectDiffuseAvailable)
+			SHADER_PARAMETER(uint32, bOverrideIndirectDiffuse)
+			SHADER_PARAMETER(float, IndirectDiffuseIntensity)
+			SHADER_PARAMETER(FVector4f, IndirectDiffuseColor)
+			SHADER_PARAMETER(float, IndirectDiffuseColorReplaceWeight)
 			SHADER_PARAMETER(float, ShadowTextureWeight)
 			SHADER_PARAMETER(FVector2f, ShadowTextureTiling)
 			SHADER_PARAMETER(FVector2f, ShadowTextureOffset)
@@ -121,7 +128,8 @@ namespace
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputIds, Index) = static_cast<uint32>(Layer.InputId);
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputChannels, Index) = static_cast<uint32>(Layer.Channel);
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputAvailability, Index) = Descriptor && Descriptor->bAvailable && Layer.Weight > 0.0f
-				&& (Descriptor->Source != EDeferredToonInputSource::EffectiveLightBuffer || Parameters.bEffectiveLightAvailable != 0u) ? 1u : 0u;
+				&& (Descriptor->Source != EDeferredToonInputSource::EffectiveLightBuffer || Parameters.bEffectiveLightAvailable != 0u)
+                && (Descriptor->Source != EDeferredToonInputSource::IndirectDiffuseBuffer || Parameters.bIndirectDiffuseAvailable != 0u) ? 1u : 0u;
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputWeights, Index) = Layer.Weight;
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputInverts, Index) = Layer.bInvert;
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputOperations, Index) = static_cast<uint32>(Layer.Operation);
@@ -143,7 +151,7 @@ namespace
 		// control.  255 preserves the legacy global console variable path.
 		const uint32 DebugView = Volume.DebugView == 255u
 			? uint32(GetDeferredToonVolumeDebugView())
-			: FMath::Min<uint32>(Volume.DebugView, 24u); // [DeferredToon] Band preview appended; existing IDs preserved.
+			: FMath::Min<uint32>(Volume.DebugView, 26u); // [DeferredToon] Band preview appended; existing IDs preserved.
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial
@@ -208,6 +216,14 @@ namespace
 		PassParameters->LitColorReplaceWeight = Volume.LitColorReplaceWeight;
 		PassParameters->ShadowColorReplaceWeight = Volume.ShadowColorReplaceWeight;
 		PassParameters->OtherLightingWeight = Volume.OtherLightingWeight;
+        // [DeferredToon] Alpha coverage distinguishes unsupported pixels from valid zero GI.
+        const FRDGTextureRef IndirectTexture = View.GetSceneTextures().ToonIndirectDiffuse;
+        PassParameters->bIndirectDiffuseAvailable = IndirectTexture && HasBeenProduced(IndirectTexture) ? 1u : 0u;
+        PassParameters->IndirectDiffuseTexture = PassParameters->bIndirectDiffuseAvailable ? IndirectTexture : GSystemTextures.GetBlackDummy(GraphBuilder);
+        PassParameters->bOverrideIndirectDiffuse = Volume.bOverrideIndirectDiffuse ? 1u : 0u;
+        PassParameters->IndirectDiffuseIntensity = Volume.IndirectDiffuseIntensity;
+        PassParameters->IndirectDiffuseColor = FVector4f(Volume.IndirectDiffuseColor.R, Volume.IndirectDiffuseColor.G, Volume.IndirectDiffuseColor.B, 1);
+        PassParameters->IndirectDiffuseColorReplaceWeight = Volume.IndirectDiffuseColorReplaceWeight;
 		PassParameters->ShadowTextureWeight = Volume.ShadowTextureWeight;
 		PassParameters->ShadowTextureTiling = FVector2f(Volume.ShadowTextureTiling);
 		PassParameters->ShadowTextureOffset = FVector2f(Volume.ShadowTextureOffset);
@@ -239,7 +255,7 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 24); // [DeferredToon] Discrete light band preview.
+	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 26); // [DeferredToon] Appended indirect diffuse diagnostics.
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(

@@ -133,7 +133,9 @@ class FDiffuseIndirectCompositePS : public FGlobalShader
 	class FHairComplexTransmittance : SHADER_PERMUTATION_BOOL("USE_HAIR_COMPLEX_TRANSMITTANCE");
 	class FScreenSpaceReflectionTiledComposition : SHADER_PERMUTATION_BOOL("SSR_TILED_COMPOSITION");
 
-	using FPermutationDomain = TShaderPermutationDomain<FApplyDiffuseIndirectDim, FUpscaleDiffuseIndirectDim, FScreenBentNormalMode, FSubstrateTileType, FEnableDualSrcBlending, FScreenSpaceReflectionTiledComposition, FHairComplexTransmittance>;
+	// [DeferredToon] UAV export preserves native dual-source blending and its MRT layout.
+	class FToonExportDiffuse : SHADER_PERMUTATION_BOOL("TOON_EXPORT_INDIRECT_DIFFUSE");
+	using FPermutationDomain = TShaderPermutationDomain<FApplyDiffuseIndirectDim, FUpscaleDiffuseIndirectDim, FScreenBentNormalMode, FSubstrateTileType, FEnableDualSrcBlending, FScreenSpaceReflectionTiledComposition, FHairComplexTransmittance, FToonExportDiffuse>;
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
@@ -143,6 +145,14 @@ class FDiffuseIndirectCompositePS : public FGlobalShader
 		}
 
 		FPermutationDomain PermutationVector(Parameters.PermutationId);
+
+		// [DeferredToon] First provider covers Lumen legacy GBuffer only. Other
+		// methods remain unavailable, rather than mislabeling scene residual as GI.
+		if (PermutationVector.Get<FToonExportDiffuse>() &&
+			(PermutationVector.Get<FApplyDiffuseIndirectDim>() != 2 || Substrate::IsSubstrateEnabled()))
+		{
+			return false;
+		}
 
 		// Only upscale SSGI
 		if (PermutationVector.Get<FApplyDiffuseIndirectDim>() != 1 && PermutationVector.Get<FUpscaleDiffuseIndirectDim>())
@@ -201,6 +211,7 @@ class FDiffuseIndirectCompositePS : public FGlobalShader
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, ViewUniformBuffer)
 
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, PassDebugOutput)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonIndirectDiffuseOutput) // [DeferredToon]
 
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float3>, OutOpaqueRoughRefractionSceneColor)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float3>, OutSubSurfaceSceneColor)
@@ -324,6 +335,8 @@ class FReflectionEnvironmentSkyLightingPS : public FGlobalShader
 	class FSubstrateTileType : SHADER_PERMUTATION_INT("SUBSTRATE_TILETYPE", 4);
 	class FHairComplexTransmittance : SHADER_PERMUTATION_BOOL("USE_HAIR_COMPLEX_TRANSMITTANCE");
 
+	// [DeferredToon] Export only the diffuse part of the native sky composite.
+	class FToonExportSkyDiffuse : SHADER_PERMUTATION_BOOL("TOON_EXPORT_SKY_DIFFUSE");
 	using FPermutationDomain = TShaderPermutationDomain<
 		FHasBoxCaptures,
 		FHasSphereCaptures,
@@ -333,7 +346,7 @@ class FReflectionEnvironmentSkyLightingPS : public FGlobalShader
 		FSkyShadowing,
 		FReflectionSourceType,
 		FSubstrateTileType,
-		FHairComplexTransmittance>;
+		FHairComplexTransmittance, FToonExportSkyDiffuse>;
 
 	static EReflectionSourceType GetReflectionSourceType(bool bIsLumenStandalone, bool bIsTiledSSR)
 	{
@@ -351,6 +364,11 @@ class FReflectionEnvironmentSkyLightingPS : public FGlobalShader
 
 	static FPermutationDomain RemapPermutation(FPermutationDomain PermutationVector)
 	{
+		// [DeferredToon] No export for reflection-only or Substrate permutations.
+		if (!PermutationVector.Get<FSkyLight>() || !PermutationVector.Get<FDynamicSkyLight>() || Substrate::IsSubstrateEnabled())
+		{
+			PermutationVector.Set<FToonExportSkyDiffuse>(false);
+		}
 		// FSkyLightingDynamicSkyLight requires FSkyLightingSkyLight.
 		if (!PermutationVector.Get<FSkyLight>())
 		{
@@ -420,6 +438,7 @@ class FReflectionEnvironmentSkyLightingPS : public FGlobalShader
 	}
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonSkyDiffuseOutput) // [DeferredToon]
 		// Distance field AO parameters.
 		// TODO. FDFAOUpsampleParameters
 		SHADER_PARAMETER(FVector2f, AOBufferBilinearUVMax)
@@ -1007,6 +1026,18 @@ void FDeferredShadingSceneRenderer::RenderDiffuseIndirectAndAmbientOcclusion(
 
 	const FRDGSystemTextures& SystemTextures = FRDGSystemTextures::Get(GraphBuilder);
 
+	// [DeferredToon] Shared storage for Lumen and non-Lumen dynamic skylight.
+	// Allocate once before either producer; no per-view clear can erase earlier views.
+	if (!bIsVisualizePass && Scene->HasAnyDeferredToonVolume()
+		&& !Substrate::IsSubstrateEnabled() && !SceneTextures.ToonIndirectDiffuse)
+	{
+		SceneTextures.ToonIndirectDiffuse = GraphBuilder.CreateTexture(
+			FRDGTextureDesc::Create2D(SceneColorTexture->Desc.Extent, PF_FloatRGBA,
+				FClearValueBinding::Transparent, TexCreate_ShaderResource | TexCreate_UAV),
+			TEXT("DeferredToon.IndirectDiffuse"));
+		AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(SceneTextures.ToonIndirectDiffuse), FVector4f(0, 0, 0, 0));
+	}
+
 	auto ShouldSkipView = [bCompositeRegularLumenOnly, &AsyncLumenIndirectLightingOutputs](const FPerViewPipelineState& ViewPipelineState)
 	{
 		const bool bOnlyCompositeStepLeft = AsyncLumenIndirectLightingOutputs.StepsLeft == ELumenIndirectLightingSteps::Composite;
@@ -1288,6 +1319,13 @@ void FDeferredShadingSceneRenderer::RenderDiffuseIndirectAndAmbientOcclusion(
 			AddClearRenderTargetPass(GraphBuilder, SceneColorTexture, FLinearColor::Black);
 		}
 
+		// [DeferredToon] Export only a supported normal rendering pass with an active
+		// consumer. Full-extent clear covers sky, partial views and unsupported pixels.
+		const bool bExportToonDiffuse = bApplyDiffuseIndirect && !bIsVisualizePass
+			&& ViewPipelineState.DiffuseIndirectMethod == EDiffuseIndirectMethod::Lumen
+			&& DenoiserOutputs.Textures[0] && !Substrate::IsSubstrateEnabled()
+			&& Scene->HasAnyDeferredToonVolume();
+
 		bool bEnableCopyPass = (!RHISupportsDualSourceBlending(ShaderPlatform) || CVarDiffuseIndirectForceCopyPass.GetValueOnRenderThread()) 
 								&& DenoiserOutputs.Textures[0];
 
@@ -1325,6 +1363,9 @@ void FDeferredShadingSceneRenderer::RenderDiffuseIndirectAndAmbientOcclusion(
 			}
 			FDiffuseIndirectCompositeParameters* PassParameters = GraphBuilder.AllocParameters<FDiffuseIndirectCompositeParameters>();
 			FDiffuseIndirectCompositePS::FParameters* PSParameters = &PassParameters->PS;
+			// [DeferredToon] RDG tracks the producer-to-volume dependency through this UAV.
+			PSParameters->ToonIndirectDiffuseOutput = bExportToonDiffuse
+				? GraphBuilder.CreateUAV(SceneTextures.ToonIndirectDiffuse) : nullptr;
 			PSParameters->Substrate = Substrate::BindSubstrateGlobalUniformParameters(View);
 			PSParameters->SceneTexturesStruct = SceneTextures.UniformBuffer;
 			PSParameters->AmbientOcclusionStaticFraction = FMath::Clamp(View.FinalPostProcessSettings.AmbientOcclusionStaticFraction, 0.0f, 1.0f);
@@ -1419,6 +1460,7 @@ void FDeferredShadingSceneRenderer::RenderDiffuseIndirectAndAmbientOcclusion(
 
 			const TCHAR* DiffuseIndirectSampling = TEXT("Disabled");
 			FDiffuseIndirectCompositePS::FPermutationDomain PermutationVector;
+			PermutationVector.Set<FDiffuseIndirectCompositePS::FToonExportDiffuse>(bExportToonDiffuse); // [DeferredToon]
 			PermutationVector.Set<FDiffuseIndirectCompositePS::FSubstrateTileType>(ESubstrateTileType::EComplex);
 
 			bool bUpscale = false;
@@ -1905,6 +1947,13 @@ static void AddSkyReflectionPass(
 		bLumenStandaloneReflections, bIsTiledSSR, bHasHairCardsOrMeshes,
 		SubstrateTileMaterialType);
 
+	// [DeferredToon] Dynamic sky diffuse is a distinct producer from Lumen GI.
+	// Lumen views do not enable dynamic sky in this pass, preventing double capture.
+	const bool bExportSkyDiffuse = bSkyLight && bDynamicSkyLight && !Substrate::IsSubstrateEnabled()
+		&& SceneTextures.ToonIndirectDiffuse;
+	PermutationVector.Set<FReflectionEnvironmentSkyLightingPS::FToonExportSkyDiffuse>(bExportSkyDiffuse);
+	PassParameters->PS.ToonSkyDiffuseOutput = bExportSkyDiffuse
+		? GraphBuilder.CreateUAV(SceneTextures.ToonIndirectDiffuse) : nullptr;
 	TShaderMapRef<FReflectionEnvironmentSkyLightingPS> PixelShader(View.ShaderMap, PermutationVector);
 	ClearUnusedGraphResources(PixelShader, &PassParameters->PS);
 

@@ -55,6 +55,11 @@ public:
     float LitColorReplaceWeight = 0.0f;
     float ShadowColorReplaceWeight = 1.0f;
     float OtherLightingWeight = 1.0f;
+    // [DeferredToon] Optional independent indirect diffuse grade.
+    bool bOverrideIndirectDiffuse = false;
+    float IndirectDiffuseIntensity = 1.0f;
+    FLinearColor IndirectDiffuseColor = FLinearColor::White;
+    float IndirectDiffuseColorReplaceWeight = 0.0f;
     float ShadowTextureWeight = 1.0f;
     FVector2D ShadowTextureTiling = FVector2D(1.0, 1.0);
     FVector2D ShadowTextureOffset = FVector2D::ZeroVector;

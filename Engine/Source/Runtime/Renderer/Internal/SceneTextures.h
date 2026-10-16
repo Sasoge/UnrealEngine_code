@@ -163,6 +163,9 @@ struct FSceneTextures : public FMinimalSceneTextures
 	FRDGTextureRef SpecularBuffer{};
 	// [DeferredToon] RGB: visible native diffuse; A: visible unit-white diffuse response.
 	FRDGTextureRef EffectiveLightBuffer{};
+	// [DeferredToon] Optional current-frame Lumen diffuse export. RGB is pre-exposed
+	// material-weighted diffuse; A is coverage (not radiance). Allocated by producer.
+	FRDGTextureRef ToonIndirectDiffuse{};
 	////////////////End//////////////////
 
 	// Texture used by the quad overdraw debug view mode when enabled.

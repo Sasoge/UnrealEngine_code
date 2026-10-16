@@ -235,6 +235,11 @@ void UDeferredToonVolumeComponent::SetEffectiveLightThreshold(float NewValue) { 
 void UDeferredToonVolumeComponent::SetLitColorReplaceWeight(float NewValue) { DTOON_SET(LitColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowColorReplaceWeight(float NewValue) { DTOON_SET(ShadowColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetOtherLightingWeight(float NewValue) { DTOON_SET(OtherLightingWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+// [DeferredToon] Indirect authoring is independent from direct band selection.
+void UDeferredToonVolumeComponent::SetOverrideIndirectDiffuse(bool NewValue) { DTOON_SET(bOverrideIndirectDiffuse, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetIndirectDiffuseIntensity(float NewValue) { DTOON_SET(IndirectDiffuseIntensity, FMath::Max(NewValue, 0.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetIndirectDiffuseColor(FLinearColor NewValue) { DTOON_SET(IndirectDiffuseColor, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetIndirectDiffuseColorReplaceWeight(float NewValue) { DTOON_SET(IndirectDiffuseColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTexture(UTexture2D* NewValue) { DTOON_SET(ShadowTexture, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTextureWeight(float NewValue) { DTOON_SET(ShadowTextureWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTextureTiling(FVector2D NewValue) { DTOON_SET(ShadowTextureTiling, NewValue, MarkRenderStateDirty()); }

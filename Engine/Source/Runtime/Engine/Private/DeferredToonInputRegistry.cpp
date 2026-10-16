@@ -59,6 +59,8 @@ namespace DeferredToonInputRegistryPrivate
 			// [DeferredToon] Shader decodes pre-exposure before exposing these semantic values.
 			Add(EDeferredToonInputId::EffectiveDirectLight, TEXT("EffectiveDirectLight"), EDeferredToonInputSource::EffectiveLightBuffer, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0.0f, 0.0f, 0.0f, 0.0f), true);
 			Add(EDeferredToonInputId::EffectiveLightResponse, TEXT("EffectiveLightResponse"), EDeferredToonInputSource::EffectiveLightBuffer, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0.0f, 0.0f, 0.0f, 0.0f), true);
+			// [DeferredToon] Runtime availability is additionally checked per frame/pixel.
+			Add(EDeferredToonInputId::IndirectDiffuse, TEXT("IndirectDiffuse"), EDeferredToonInputSource::IndirectDiffuseBuffer, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0, 0, 0, 0), true);
 			Add(EDeferredToonInputId::DeprecatedShadowBuffer, TEXT("DeprecatedShadowBuffer"), EDeferredToonInputSource::ShadowBuffer, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Linear, FVector4f(1.0f, 1.0f, 1.0f, 1.0f), false, true, EDeferredToonInputId::NativeShadow);
 			return Result;
 		}();

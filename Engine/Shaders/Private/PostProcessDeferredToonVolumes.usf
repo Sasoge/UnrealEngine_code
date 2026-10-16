@@ -42,6 +42,13 @@ float4 LightBandColors[8];
 float LitColorReplaceWeight;
 float ShadowColorReplaceWeight;
 float OtherLightingWeight;
+// [DeferredToon] RGB pre-exposed, A coverage; alpha is never exposure-scaled.
+Texture2D IndirectDiffuseTexture;
+uint bIndirectDiffuseAvailable;
+uint bOverrideIndirectDiffuse;
+float IndirectDiffuseIntensity;
+float4 IndirectDiffuseColor;
+float IndirectDiffuseColorReplaceWeight;
 float ShadowTextureWeight;
 float2 ShadowTextureTiling;
 float2 ShadowTextureOffset;
@@ -182,6 +189,11 @@ float4 EvaluateDeferredToonInput(uint LayerIndex, float2 UV, FGBufferData GBuffe
     case 14u:
         SourceValue = (EffectiveLightBufferTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).a * PrimaryView.OneOverPreExposure).xxxx;
         break;
+    case 15: // [DeferredToon] Independent scene-linear indirect material response.
+        SourceValue = IndirectDiffuseTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+        SourceValue = (bIndirectDiffuseAvailable != 0u && SourceValue.a > 0.5f)
+            ? float4(max(SourceValue.rgb, 0.0f) * PrimaryView.OneOverPreExposure, 1.0f) : 0.0f;
+        break;
 	default:
 		return InputDefaults[LayerIndex];
 	}
@@ -277,6 +289,9 @@ void MainPS(
 	const float DirectLightFacing = SampleDeferredToonFacing(UV); // Diagnostic/art input only.
 	const float4 EffectiveLight = max(EffectiveLightBufferTexture.SampleLevel(GlobalPointClampedSampler, UV, 0)
 		* PrimaryView.OneOverPreExposure, 0.0f);
+    // [DeferredToon] Never feed indirect lighting back into direct band selection.
+    const float4 IndirectSample = IndirectDiffuseTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    const bool bValidIndirect = bIndirectDiffuseAvailable != 0u && IndirectSample.a > 0.5f;
 	const float EffectiveLitMask = EffectiveLight.a > 0.0f ? step(max(EffectiveLightThreshold, 0.0f), EffectiveLight.a) : 0.0f;
 	const float DirectLightMask = EffectiveLitMask;
 	const float NativeShadowMask = saturate(ShadowBufferTexture.SampleLevel(ShadowBufferSampler, UV, 0).r);
@@ -441,6 +456,14 @@ void MainPS(
         // the downstream tonemapper, so changing pre-exposure does not dim this view.
         OutColor = float4((EffectiveLight.a / (1.0f + EffectiveLight.a)).xxx * PrimaryView.PreExposure, 1.0f);
     }
+    else if (DebugView == 25)
+    {
+        OutColor = float4(bValidIndirect ? max(IndirectSample.rgb, 0.0f) : 0.0f, 1.0f);
+    }
+    else if (DebugView == 26)
+    {
+        OutColor = float4((bValidIndirect ? 1.0f : 0.0f).xxx, 1.0f);
+    }
     else if (DebugView == 24)
     {
         // [DeferredToon] Data level is discrete, display still passes through the tonemapper.
@@ -488,7 +511,20 @@ void MainPS(
             const float3 GradedDirect = lerp(BandTintedColor, BandReplacementColor, saturate(MappedBandColorWeight)) * PrimaryView.PreExposure;
             const float3 OriginalColor = Texture2DSampleLevel(OriginalSceneColorTexture, SceneColorSampler, UV, 0).rgb;
             const float3 Residual = max(OriginalColor - EffectiveLight.rgb * PrimaryView.PreExposure, 0.0f);
-            OutputColor = lerp(SceneColor.rgb, GradedDirect + Residual * saturate(OtherLightingWeight), Weight);
+            float3 OtherContribution = Residual * saturate(OtherLightingWeight);
+            if (bOverrideIndirectDiffuse != 0u && bValidIndirect)
+            {
+                // [DeferredToon] Bound subtraction by the available residual. Fog/SSS
+                // and other later passes may prevent an exact local decomposition.
+                // Neutral settings + Other=1 reproduce the old composite exactly.
+                const float3 ExtractedIndirect = min(max(IndirectSample.rgb, 0.0f), Residual);
+                const float3 NativeIndirect = ExtractedIndirect * PrimaryView.OneOverPreExposure;
+                const float3 Tint = max(IndirectDiffuseColor.rgb, 0.0f);
+                const float3 GradedIndirect = lerp(NativeIndirect * Tint, Tint * AuthoredBase,
+                    saturate(IndirectDiffuseColorReplaceWeight)) * max(IndirectDiffuseIntensity, 0.0f) * PrimaryView.PreExposure;
+                OtherContribution = GradedIndirect + (Residual - ExtractedIndirect) * saturate(OtherLightingWeight);
+            }
+            OutputColor = lerp(SceneColor.rgb, GradedDirect + OtherContribution, Weight);
         }
 		OutColor = float4(OutputColor, SceneColor.a);
 	}

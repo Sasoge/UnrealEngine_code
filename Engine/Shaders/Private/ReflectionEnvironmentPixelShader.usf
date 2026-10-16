@@ -401,6 +401,11 @@ FLumenReflectionOnlyOutput GetLumenReflectionOnly(
 #endif // SUBTRATE_GBUFFER_FORMAT==1
 
 
+// [DeferredToon] Same texture contract as the Lumen diffuse provider.
+#if TOON_EXPORT_SKY_DIFFUSE
+RWTexture2D<float4> ToonSkyDiffuseOutput;
+#endif
+
 void ReflectionEnvironmentSkyLighting(
 	in float4 SvPosition : SV_Position,
 	out float4 OutColor : SV_Target0
@@ -417,6 +422,9 @@ void ReflectionEnvironmentSkyLighting(
 	float2 ScreenPosition = SvPositionToScreenPosition(SvPosition).xy;
 	
 	OutColor = 0.0f;
+	#if TOON_EXPORT_SKY_DIFFUSE
+	ToonSkyDiffuseOutput[PixelPos] = 0.0f; // [DeferredToon] Unlit pixels are unavailable.
+	#endif
 #if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
 	OutOpaqueRoughRefractionSceneColor = 0.0f;
 	OutSubSurfaceSceneColor = 0.0f;
@@ -615,6 +623,12 @@ void ReflectionEnvironmentSkyLighting(
 		const bool bNeedsSeparateSubsurfaceLightAccumulation = UseSubsurfaceProfile(ShadingModelID);
 		LightAccumulator_Add(LightAccumulator, SkyLighting, SkyLighting, 1.0f, bNeedsSeparateSubsurfaceLightAccumulation);
 		OutColor = LightAccumulator_GetResult(LightAccumulator);
+		#if TOON_EXPORT_SKY_DIFFUSE
+		// [DeferredToon] SkyLightDiffuse already includes PreExposure, material
+		// diffuse and occlusion. Capture before ReflectionEnvironment is added.
+		ToonSkyDiffuseOutput[PixelPos] = !bNeedsSeparateSubsurfaceLightAccumulation
+			? float4(SkyLighting, 1.0f) : 0.0f;
+		#endif
 	}
 
 #endif // ENABLE_DYNAMIC_SKY_LIGHT 

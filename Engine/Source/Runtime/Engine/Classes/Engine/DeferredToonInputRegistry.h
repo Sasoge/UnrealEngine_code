@@ -26,6 +26,7 @@ enum class EDeferredToonInputId : uint16
 	// [DeferredToon] New semantics; existing IDs and bounded layer ABI stay stable.
 	EffectiveDirectLight = 13,
 	EffectiveLightResponse = 14,
+	IndirectDiffuse = 15, // [DeferredToon] Scene-linear Lumen material-weighted diffuse.
 
 	// [DeferredToon] Retain retired IDs so old assets can resolve to a
 	// documented fallback instead of silently changing their meaning.
@@ -42,6 +43,7 @@ enum class EDeferredToonInputSource : uint8
 	SceneTextures,
 	GBuffer,
 	EffectiveLightBuffer, // [DeferredToon]
+	IndirectDiffuseBuffer, // [DeferredToon]
 };
 
 enum class EDeferredToonInputChannel : uint8

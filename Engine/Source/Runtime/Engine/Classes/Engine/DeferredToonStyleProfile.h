@@ -27,6 +27,7 @@ enum class EDeferredToonStyleInputId : uint8
     // [DeferredToon] Scene-linear visible color and material-independent light response.
     EffectiveDirectLight = 13 UMETA(DisplayName="Effective Direct Diffuse"),
     EffectiveLightResponse = 14 UMETA(DisplayName="Effective Light Response"),
+    IndirectDiffuse = 15 UMETA(DisplayName="Indirect Diffuse"), // [DeferredToon]
     DeprecatedShadowBuffer = 100 UMETA(DisplayName="Deprecated Shadow Buffer"),
 };
 

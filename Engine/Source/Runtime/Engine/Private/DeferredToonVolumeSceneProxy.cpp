@@ -33,6 +33,11 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     LitColorReplaceWeight = Component->LitColorReplaceWeight;
     ShadowColorReplaceWeight = Component->ShadowColorReplaceWeight;
     OtherLightingWeight = Component->OtherLightingWeight;
+    // [DeferredToon] Sanitize numeric limits at the render boundary as well as in UI.
+    bOverrideIndirectDiffuse = Component->bOverrideIndirectDiffuse;
+    IndirectDiffuseIntensity = FMath::Max(Component->IndirectDiffuseIntensity, 0.0f);
+    IndirectDiffuseColor = Component->IndirectDiffuseColor;
+    IndirectDiffuseColorReplaceWeight = FMath::Clamp(Component->IndirectDiffuseColorReplaceWeight, 0.0f, 1.0f);
     // [DeferredToon] Resolve authored bands once per proxy update, not per pixel.
     static_assert(MaxLightBands == UDeferredToonVolumeComponent::MaxLightBands);
     for (int32 Index = 0; Index < MaxLightBands; ++Index)

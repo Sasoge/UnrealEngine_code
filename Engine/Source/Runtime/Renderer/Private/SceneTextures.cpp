@@ -972,6 +972,7 @@ TArray<FRDGTextureRef> FSceneTextures::EnumerateSceneTextures() const
 	// [DeferredToon] Expose the split specular MRT for debug inspection.
 	AddTextureIfNonNull(SpecularBuffer, Results);
 	AddTextureIfNonNull(EffectiveLightBuffer, Results); // [DeferredToon]
+	AddTextureIfNonNull(ToonIndirectDiffuse, Results); // [DeferredToon]
 	AddTextureIfNonNull(QuadOverdraw, Results);
 #if WITH_EDITOR
 	AddTextureIfNonNull(EditorPrimitiveColor, Results);
