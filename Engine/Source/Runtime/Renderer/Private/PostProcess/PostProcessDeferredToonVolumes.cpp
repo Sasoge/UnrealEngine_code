@@ -25,7 +25,7 @@ namespace
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
 		// [DeferredToon] View 20 previews the new independent two-band output mask.
-		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light), 25 indirect diffuse (Lumen or dynamic sky), 26 indirect availability."),
+		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light), 25 indirect diffuse (Lumen or dynamic sky), 26 indirect availability, 27 sky diffuse before AO, 28 sky combined AO (white=unoccluded), 29 sky split availability."),
 		ECVF_RenderThreadSafe);
 
 	class FDeferredToonVolumePS : public FGlobalShader
@@ -87,6 +87,13 @@ namespace
 			SHADER_PARAMETER(float, IndirectDiffuseIntensity)
 			SHADER_PARAMETER(FVector4f, IndirectDiffuseColor)
 			SHADER_PARAMETER(float, IndirectDiffuseColorReplaceWeight)
+			// [DeferredToon] RGB before AO, alpha visibility or -1 invalid.
+			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SkyDiffuseBeforeAOTexture)
+			SHADER_PARAMETER(uint32, bSkyOcclusionAvailable)
+			SHADER_PARAMETER(uint32, bOverrideSkyOcclusion)
+			SHADER_PARAMETER(float, SkyOcclusionStrength)
+			SHADER_PARAMETER(FVector4f, SkyOcclusionColor)
+			SHADER_PARAMETER(float, SkyOcclusionColorReplaceWeight)
 			SHADER_PARAMETER(float, ShadowTextureWeight)
 			SHADER_PARAMETER(FVector2f, ShadowTextureTiling)
 			SHADER_PARAMETER(FVector2f, ShadowTextureOffset)
@@ -129,7 +136,8 @@ namespace
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputChannels, Index) = static_cast<uint32>(Layer.Channel);
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputAvailability, Index) = Descriptor && Descriptor->bAvailable && Layer.Weight > 0.0f
 				&& (Descriptor->Source != EDeferredToonInputSource::EffectiveLightBuffer || Parameters.bEffectiveLightAvailable != 0u)
-                && (Descriptor->Source != EDeferredToonInputSource::IndirectDiffuseBuffer || Parameters.bIndirectDiffuseAvailable != 0u) ? 1u : 0u;
+                && (Descriptor->Source != EDeferredToonInputSource::IndirectDiffuseBuffer || Parameters.bIndirectDiffuseAvailable != 0u)
+                && (Descriptor->Source != EDeferredToonInputSource::SkyDiffuseBeforeAOBuffer || Parameters.bSkyOcclusionAvailable != 0u) ? 1u : 0u; // [DeferredToon]
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputWeights, Index) = Layer.Weight;
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputInverts, Index) = Layer.bInvert;
 			GET_SCALAR_ARRAY_ELEMENT(Parameters.InputOperations, Index) = static_cast<uint32>(Layer.Operation);
@@ -151,7 +159,7 @@ namespace
 		// control.  255 preserves the legacy global console variable path.
 		const uint32 DebugView = Volume.DebugView == 255u
 			? uint32(GetDeferredToonVolumeDebugView())
-			: FMath::Min<uint32>(Volume.DebugView, 26u); // [DeferredToon] Band preview appended; existing IDs preserved.
+			: FMath::Min<uint32>(Volume.DebugView, 29u); // [DeferredToon] Band preview appended; existing IDs preserved.
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial
@@ -224,6 +232,14 @@ namespace
         PassParameters->IndirectDiffuseIntensity = Volume.IndirectDiffuseIntensity;
         PassParameters->IndirectDiffuseColor = FVector4f(Volume.IndirectDiffuseColor.R, Volume.IndirectDiffuseColor.G, Volume.IndirectDiffuseColor.B, 1);
         PassParameters->IndirectDiffuseColorReplaceWeight = Volume.IndirectDiffuseColorReplaceWeight;
+        // [DeferredToon] Allocation alone does not imply valid pixels; alpha is checked in HLSL.
+        const FRDGTextureRef SkySplitTexture = View.GetSceneTextures().ToonSkyDiffuseBeforeAO;
+        PassParameters->bSkyOcclusionAvailable = SkySplitTexture && HasBeenProduced(SkySplitTexture) ? 1u : 0u;
+        PassParameters->SkyDiffuseBeforeAOTexture = PassParameters->bSkyOcclusionAvailable ? SkySplitTexture : GSystemTextures.GetBlackDummy(GraphBuilder);
+        PassParameters->bOverrideSkyOcclusion = Volume.bOverrideSkyOcclusion ? 1u : 0u;
+        PassParameters->SkyOcclusionStrength = Volume.SkyOcclusionStrength;
+        PassParameters->SkyOcclusionColor = FVector4f(Volume.SkyOcclusionColor.R, Volume.SkyOcclusionColor.G, Volume.SkyOcclusionColor.B, 1);
+        PassParameters->SkyOcclusionColorReplaceWeight = Volume.SkyOcclusionColorReplaceWeight;
 		PassParameters->ShadowTextureWeight = Volume.ShadowTextureWeight;
 		PassParameters->ShadowTextureTiling = FVector2f(Volume.ShadowTextureTiling);
 		PassParameters->ShadowTextureOffset = FVector2f(Volume.ShadowTextureOffset);
@@ -255,7 +271,7 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 26); // [DeferredToon] Appended indirect diffuse diagnostics.
+	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 29); // [DeferredToon] Appended indirect diffuse diagnostics.
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(

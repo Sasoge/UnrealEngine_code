@@ -439,6 +439,7 @@ class FReflectionEnvironmentSkyLightingPS : public FGlobalShader
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonSkyDiffuseOutput) // [DeferredToon]
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonSkyDiffuseBeforeAOOutput) // [DeferredToon]
 		// Distance field AO parameters.
 		// TODO. FDFAOUpsampleParameters
 		SHADER_PARAMETER(FVector2f, AOBufferBilinearUVMax)
@@ -1036,6 +1037,12 @@ void FDeferredShadingSceneRenderer::RenderDiffuseIndirectAndAmbientOcclusion(
 				FClearValueBinding::Transparent, TexCreate_ShaderResource | TexCreate_UAV),
 			TEXT("DeferredToon.IndirectDiffuse"));
 		AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(SceneTextures.ToonIndirectDiffuse), FVector4f(0, 0, 0, 0));
+		// [DeferredToon] Shared frame storage; invalid sentinel also covers Lumen views.
+		SceneTextures.ToonSkyDiffuseBeforeAO = GraphBuilder.CreateTexture(
+			FRDGTextureDesc::Create2D(SceneColorTexture->Desc.Extent, PF_FloatRGBA,
+				FClearValueBinding::Transparent, TexCreate_ShaderResource | TexCreate_UAV),
+			TEXT("DeferredToon.SkyDiffuseBeforeAO"));
+		AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(SceneTextures.ToonSkyDiffuseBeforeAO), FVector4f(0, 0, 0, -1));
 	}
 
 	auto ShouldSkipView = [bCompositeRegularLumenOnly, &AsyncLumenIndirectLightingOutputs](const FPerViewPipelineState& ViewPipelineState)
@@ -1954,6 +1961,8 @@ static void AddSkyReflectionPass(
 	PermutationVector.Set<FReflectionEnvironmentSkyLightingPS::FToonExportSkyDiffuse>(bExportSkyDiffuse);
 	PassParameters->PS.ToonSkyDiffuseOutput = bExportSkyDiffuse
 		? GraphBuilder.CreateUAV(SceneTextures.ToonIndirectDiffuse) : nullptr;
+	PassParameters->PS.ToonSkyDiffuseBeforeAOOutput = bExportSkyDiffuse
+		? GraphBuilder.CreateUAV(SceneTextures.ToonSkyDiffuseBeforeAO) : nullptr; // [DeferredToon]
 	TShaderMapRef<FReflectionEnvironmentSkyLightingPS> PixelShader(View.ShaderMap, PermutationVector);
 	ClearUnusedGraphResources(PixelShader, &PassParameters->PS);
 

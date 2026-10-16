@@ -10,7 +10,7 @@ namespace DeferredToonInputRegistryPrivate
 		static TArray<FDeferredToonInputDescriptor> Descriptors = []
 		{
 			TArray<FDeferredToonInputDescriptor> Result;
-			Result.Reserve(15); // [DeferredToon] Facing input plus retired descriptor.
+			Result.Reserve(18); // [DeferredToon] Built-in semantics plus retired descriptor.
 
 			auto Add = [&Result](
 				EDeferredToonInputId Id,
@@ -61,6 +61,9 @@ namespace DeferredToonInputRegistryPrivate
 			Add(EDeferredToonInputId::EffectiveLightResponse, TEXT("EffectiveLightResponse"), EDeferredToonInputSource::EffectiveLightBuffer, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0.0f, 0.0f, 0.0f, 0.0f), true);
 			// [DeferredToon] Runtime availability is additionally checked per frame/pixel.
 			Add(EDeferredToonInputId::IndirectDiffuse, TEXT("IndirectDiffuse"), EDeferredToonInputSource::IndirectDiffuseBuffer, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0, 0, 0, 0), true);
+			// [DeferredToon] Shared provider, distinct semantic decoding and neutral fallbacks.
+			Add(EDeferredToonInputId::SkyDiffuseBeforeAO, TEXT("SkyDiffuseBeforeAO"), EDeferredToonInputSource::SkyDiffuseBeforeAOBuffer, EDeferredToonInputChannel::RGB, EDeferredToonInputDecode::Linear, EDeferredToonInputColorSpace::Linear, FVector4f(0, 0, 0, 0), true);
+			Add(EDeferredToonInputId::SkyOcclusion, TEXT("SkyOcclusion"), EDeferredToonInputSource::SkyDiffuseBeforeAOBuffer, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Linear, FVector4f(1, 1, 1, 1), true);
 			Add(EDeferredToonInputId::DeprecatedShadowBuffer, TEXT("DeprecatedShadowBuffer"), EDeferredToonInputSource::ShadowBuffer, EDeferredToonInputChannel::R, EDeferredToonInputDecode::Normalized, EDeferredToonInputColorSpace::Linear, FVector4f(1.0f, 1.0f, 1.0f, 1.0f), false, true, EDeferredToonInputId::NativeShadow);
 			return Result;
 		}();

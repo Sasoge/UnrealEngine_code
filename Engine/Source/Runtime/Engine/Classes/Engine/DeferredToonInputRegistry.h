@@ -26,7 +26,9 @@ enum class EDeferredToonInputId : uint16
 	// [DeferredToon] New semantics; existing IDs and bounded layer ABI stay stable.
 	EffectiveDirectLight = 13,
 	EffectiveLightResponse = 14,
-	IndirectDiffuse = 15, // [DeferredToon] Scene-linear Lumen material-weighted diffuse.
+	IndirectDiffuse = 15, // [DeferredToon] Scene-linear material-weighted diffuse.
+	SkyDiffuseBeforeAO = 16, // [DeferredToon] RGB, decoded from pre-exposure.
+	SkyOcclusion = 17, // [DeferredToon] Combined sky visibility, white = unoccluded.
 
 	// [DeferredToon] Retain retired IDs so old assets can resolve to a
 	// documented fallback instead of silently changing their meaning.
@@ -44,6 +46,7 @@ enum class EDeferredToonInputSource : uint8
 	GBuffer,
 	EffectiveLightBuffer, // [DeferredToon]
 	IndirectDiffuseBuffer, // [DeferredToon]
+	SkyDiffuseBeforeAOBuffer, // [DeferredToon] Two semantic inputs share one RGBA16F resource.
 };
 
 enum class EDeferredToonInputChannel : uint8

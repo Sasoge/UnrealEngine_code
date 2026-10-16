@@ -4,7 +4,9 @@ from pathlib import Path
 import unreal
 
 sky_only_run = '-toonindirectskyonly' in unreal.SystemLibrary.get_command_line().lower()
-out = Path(unreal.Paths.project_saved_dir()) / ('Automation/DeferredToonIndirectSkyOnly' if sky_only_run else 'Automation/DeferredToonIndirect')
+sky_split_run = '-toonskyocclusionsplit' in unreal.SystemLibrary.get_command_line().lower()
+captured_sky_run = '-toonskyocclusioncapturedsky' in unreal.SystemLibrary.get_command_line().lower()
+out = Path(unreal.Paths.project_saved_dir()) / ('Automation/DeferredToonSkyOcclusionCaptured' if sky_split_run and captured_sky_run else 'Automation/DeferredToonSkyOcclusion' if sky_split_run else 'Automation/DeferredToonIndirectSkyOnly' if sky_only_run else 'Automation/DeferredToonIndirect')
 out.mkdir(parents=True, exist_ok=True)
 editor = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
 actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
@@ -140,6 +142,65 @@ if sky_only_run:
         ('sky-indirect', [lambda: debug(unreal.DeferredToonDebugView.INDIRECT_DIFFUSE)]),
         ('sky-coverage', [lambda: debug(unreal.DeferredToonDebugView.INDIRECT_DIFFUSE_COVERAGE)]),
         ('sky-zero', [output, lambda: apply('set_indirect_diffuse_intensity', 0)]),
+    ]
+
+if sky_split_run:
+    # Exercise the non-Lumen provider with real distance-field occluders in the
+    # test map. Temporary component edits and all console changes are unsaved.
+    for actor in actors:
+        for component in actor.get_components_by_class(unreal.SkyLightComponent):
+            unreal.log('SKY_SPLIT_ORIGINAL_SOURCE: ' + str(component.get_editor_property('source_type'))
+                       + ' realtime=' + str(component.get_editor_property('real_time_capture')))
+            component.set_mobility(unreal.ComponentMobility.MOVABLE)
+            component.set_editor_property('min_occlusion', 0.0)
+            component.set_editor_property('occlusion_exponent', 1.6)
+            component.set_editor_property('occlusion_max_distance', 600.0)
+            if not captured_sky_run:
+                # A fixed cubemap isolates exposure conversion from captured-sky
+                # changes. The optional captured-sky run remains a diagnostic.
+                component.set_real_time_capture(False)
+                component.set_editor_property('source_type', unreal.SkyLightSourceType.SLS_SPECIFIED_CUBEMAP)
+                component.set_cubemap(unreal.load_asset('/Engine/MapTemplates/Sky/DaylightAmbientCubemap'))
+    command('r.DistanceFieldAO 1')
+
+    def split_neutral():
+        neutral()
+        apply('set_override_sky_occlusion', True)
+        apply('set_sky_occlusion_strength', 1)
+        apply('set_sky_occlusion_color_replace_weight', 0)
+
+    def lumen():
+        command('r.Lumen.DiffuseIndirect.Allow 1')
+        for actor in actors:
+            if isinstance(actor, unreal.PostProcessVolume):
+                settings = actor.get_editor_property('settings')
+                settings.set_editor_property('dynamic_global_illumination_method', unreal.DynamicGlobalIlluminationMethod.LUMEN)
+                actor.set_editor_property('settings', settings)
+
+    phases = [
+        ('native-final', [sky_only, neutral, lambda: debug(unreal.DeferredToonDebugView.INDIRECT_DIFFUSE)]),
+        ('native-final-exposure', [lambda: command('r.EyeAdaptation.PreExposureOverride 4')]),
+        ('native-final-restored', [lambda: command('r.EyeAdaptation.PreExposureOverride 1')]),
+        ('before-ao', [lambda: debug(unreal.DeferredToonDebugView.SKY_DIFFUSE_BEFORE_AO)]),
+        ('before-ao-exposure', [lambda: command('r.EyeAdaptation.PreExposureOverride 4')]),
+        ('before-ao-restored', [lambda: command('r.EyeAdaptation.PreExposureOverride 1')]),
+        ('visibility', [lambda: command('r.EyeAdaptation.PreExposureOverride 1'), lambda: debug(unreal.DeferredToonDebugView.SKY_OCCLUSION)]),
+        ('visibility-exposure', [lambda: command('r.EyeAdaptation.PreExposureOverride 4')]),
+        ('validity', [lambda: command('r.EyeAdaptation.PreExposureOverride 1'), lambda: debug(unreal.DeferredToonDebugView.SKY_OCCLUSION_COVERAGE)]),
+        ('legacy', [output, lambda: apply('set_override_sky_occlusion', False)]),
+        ('neutral', [split_neutral]),
+        ('ao-removed', [lambda: apply('set_sky_occlusion_strength', 0)]),
+        ('ao-color-disabled', [lambda: apply('set_sky_occlusion_color', unreal.LinearColor(.8, .02, .01, 1)), lambda: apply('set_sky_occlusion_color_replace_weight', 1)]),
+        ('ao-colored', [lambda: apply('set_sky_occlusion_strength', 1)]),
+        ('bands-colored', [lambda: debug(unreal.DeferredToonDebugView.LIGHT_BAND_VALUE)]),
+        ('bands-native', [lambda: apply('set_override_sky_occlusion', False)]),
+        ('visibility-tsr', [lambda: debug(unreal.DeferredToonDebugView.SKY_OCCLUSION), lambda: command('r.AntiAliasingMethod 4'), lambda: command('r.ScreenPercentage 67')]),
+        ('missing-validity', [lambda: command('r.ScreenPercentage 100'), lambda: sky_visibility(False), lambda: debug(unreal.DeferredToonDebugView.SKY_OCCLUSION_COVERAGE)]),
+        ('missing-legacy', [output]),
+        ('missing-override', [lambda: apply('set_override_sky_occlusion', True), lambda: apply('set_sky_occlusion_strength', 0)]),
+        ('lumen-validity', [lambda: sky_visibility(True), lumen, lambda: debug(unreal.DeferredToonDebugView.SKY_OCCLUSION_COVERAGE)]),
+        ('lumen-indirect-validity', [lambda: debug(unreal.DeferredToonDebugView.INDIRECT_DIFFUSE_COVERAGE)]),
+        ('sky-restored', [sky_only, lambda: debug(unreal.DeferredToonDebugView.SKY_OCCLUSION_COVERAGE)]),
     ]
 
 phase = 0

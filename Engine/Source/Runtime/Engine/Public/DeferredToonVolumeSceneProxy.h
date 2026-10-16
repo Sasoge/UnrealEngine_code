@@ -60,6 +60,11 @@ public:
     float IndirectDiffuseIntensity = 1.0f;
     FLinearColor IndirectDiffuseColor = FLinearColor::White;
     float IndirectDiffuseColorReplaceWeight = 0.0f;
+    // [DeferredToon] Optional sky split controls.
+    bool bOverrideSkyOcclusion = false;
+    float SkyOcclusionStrength = 1.0f;
+    FLinearColor SkyOcclusionColor = FLinearColor::Black;
+    float SkyOcclusionColorReplaceWeight = 0.0f;
     float ShadowTextureWeight = 1.0f;
     FVector2D ShadowTextureTiling = FVector2D(1.0, 1.0);
     FVector2D ShadowTextureOffset = FVector2D::ZeroVector;

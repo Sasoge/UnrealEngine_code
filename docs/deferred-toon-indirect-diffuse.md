@@ -26,6 +26,8 @@
 
 首版覆盖 **Lumen、非 Lumen 动态天光 + 传统 GBuffer 的延迟不透明表面**。Substrate、独立 SSGI 的反弹光、Lightmap/VLM、Ambient Cubemap 等来源尚未单独导出；需要后续逐个接入。启用 SSGI 时若动态天光也参与画面，此 RT 只代表已接入的天光部分，不代表全部 GI。需后处理散射的 SSS 像素不参与独立调整，避免在扩散前提取、扩散后错误扣除。透明物体也不作为本阶段的独立表面层。有效性按像素记录，不以“RGB 是否为黑”判断。
 
+后续扩展：[天光遮蔽独立控制](deferred-toon-sky-occlusion.md)。在保留这里的原生最终间接漫反射基础上，新增 AO 前天光和综合遮蔽输入；不会把 Lumen 的追踪遮挡伪装成可逆的 AO。
+
 ## 如何使用
 
 1. 输出模式选择 **直接光调色 / Direct Light Grade**。

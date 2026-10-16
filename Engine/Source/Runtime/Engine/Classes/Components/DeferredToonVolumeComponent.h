@@ -62,7 +62,7 @@ enum class EDeferredToonDebugView : uint8
     ShadowChannel = 6 UMETA(DisplayName="6 - Shadow Channel"),
     BaseColor = 7 UMETA(DisplayName="7 - Base Color"),
     WorldNormal = 8 UMETA(DisplayName="8 - World Normal"),
-    AmbientOcclusion = 9 UMETA(DisplayName="9 - Ambient Occlusion"),
+    AmbientOcclusion = 9 UMETA(DisplayName="9 - Screen Space AO"),
     StyleMask = 10 UMETA(DisplayName="10 - Style Mask"),
     StyleColor = 11 UMETA(DisplayName="11 - Style Color"),
     Depth = 12 UMETA(DisplayName="12 - Linear Depth"),
@@ -84,6 +84,10 @@ enum class EDeferredToonDebugView : uint8
     // [DeferredToon] Append only: preserve saved debug IDs.
     IndirectDiffuse = 25 UMETA(DisplayName="25 - Indirect Diffuse"),
     IndirectDiffuseCoverage = 26 UMETA(DisplayName="26 - Indirect Diffuse Availability"),
+    // [DeferredToon] Sky-only split diagnostics; existing debug IDs remain stable.
+    SkyDiffuseBeforeAO = 27 UMETA(DisplayName="27 - Sky Diffuse Before AO"),
+    SkyOcclusion = 28 UMETA(DisplayName="28 - Sky Combined AO (White = Unoccluded)"),
+    SkyOcclusionCoverage = 29 UMETA(DisplayName="29 - Sky AO Split Availability"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 
@@ -183,6 +187,20 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Color Replacement", ClampMin="0.0", ClampMax="1.0", EditCondition="bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="0 multiplies native indirect by Color; 1 replaces it with Color, including zero-GI surfaces. Material Base Color Influence affects replacement only."))
     float IndirectDiffuseColorReplaceWeight = 0.0f;
 
+    // [DeferredToon] Optional sky-only occlusion grading, separate from diffuse color.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect AO", meta=(DisplayName="Adjust Sky Occlusion Separately", EditCondition="bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="SkyLight only. Lumen and unsupported pixels keep their original diffuse result. Enable independent indirect diffuse first."))
+    bool bOverrideSkyOcclusion = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect AO", meta=(DisplayName="Occlusion Strength", ClampMin="0.0", ClampMax="1.0", EditCondition="bOverrideSkyOcclusion && bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="1 preserves native sky occlusion; 0 restores sky diffuse before local AO, bent-normal redirection and occlusion tint. Cloud shadowing remains."))
+    float SkyOcclusionStrength = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect AO", meta=(DisplayName="Occlusion Color", HideAlphaChannel, EditCondition="bOverrideSkyOcclusion && bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Scene-linear replacement color for the occluded portion of indirect diffuse. Does not tint direct light or reflections."))
+    FLinearColor SkyOcclusionColor = FLinearColor::Black;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect AO", meta=(DisplayName="Color Replacement", ClampMin="0.0", ClampMax="1.0", EditCondition="bOverrideSkyOcclusion && bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="0 preserves graded indirect color. 1 applies Occlusion Color weighted by native combined sky occlusion and Occlusion Strength. White AO pixels remain unchanged."))
+    float SkyOcclusionColorReplaceWeight = 0.0f;
+
+
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Textures", meta=(DisplayName="Shadow Texture (2D)", DisplayPriority="0", EditCondition="(OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade || OutputMode == EDeferredToonVolumeOutputMode::ToonRecompose) || OutputMode == EDeferredToonVolumeOutputMode::NativeComposite", EditConditionHides, ToolTip="Optional box-local triplanar texture. Each band controls its texture influence; in two-band mode it affects the shadow region."))
     TObjectPtr<UTexture2D> ShadowTexture = nullptr;
@@ -250,6 +268,11 @@ public:
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseIntensity(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseColor(FLinearColor NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseColorReplaceWeight(float NewValue);
+    // [DeferredToon] Runtime authoring invalidates the scene proxy.
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOverrideSkyOcclusion(bool NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetSkyOcclusionStrength(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetSkyOcclusionColor(FLinearColor NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetSkyOcclusionColorReplaceWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTexture(UTexture2D* NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTextureWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowTextureTiling(FVector2D NewValue);

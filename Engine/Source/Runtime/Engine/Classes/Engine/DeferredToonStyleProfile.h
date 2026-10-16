@@ -14,7 +14,7 @@ enum class EDeferredToonStyleInputId : uint8
     DirectLight = 1 UMETA(DisplayName="Direct Light"),
     NativeShadow = 2 UMETA(DisplayName="Native Shadow"),
     ShadowChannel = 3 UMETA(DisplayName="Shadow Channel"),
-    AmbientOcclusion = 4 UMETA(DisplayName="Ambient Occlusion"),
+    AmbientOcclusion = 4 UMETA(DisplayName="Screen Space AO"),
     BaseColor = 5 UMETA(DisplayName="Base Color"),
     WorldNormal = 6 UMETA(DisplayName="World Normal"),
     Roughness = 7 UMETA(DisplayName="Roughness"),
@@ -28,6 +28,8 @@ enum class EDeferredToonStyleInputId : uint8
     EffectiveDirectLight = 13 UMETA(DisplayName="Effective Direct Diffuse"),
     EffectiveLightResponse = 14 UMETA(DisplayName="Effective Light Response"),
     IndirectDiffuse = 15 UMETA(DisplayName="Indirect Diffuse"), // [DeferredToon]
+    SkyDiffuseBeforeAO = 16 UMETA(DisplayName="Sky Diffuse Before AO"), // [DeferredToon]
+    SkyOcclusion = 17 UMETA(DisplayName="Sky Combined AO"), // [DeferredToon]
     DeprecatedShadowBuffer = 100 UMETA(DisplayName="Deprecated Shadow Buffer"),
 };
 

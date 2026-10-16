@@ -38,6 +38,11 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     IndirectDiffuseIntensity = FMath::Max(Component->IndirectDiffuseIntensity, 0.0f);
     IndirectDiffuseColor = Component->IndirectDiffuseColor;
     IndirectDiffuseColorReplaceWeight = FMath::Clamp(Component->IndirectDiffuseColorReplaceWeight, 0.0f, 1.0f);
+    // [DeferredToon] Bound runtime values before passing them to the shader.
+    bOverrideSkyOcclusion = Component->bOverrideSkyOcclusion;
+    SkyOcclusionStrength = FMath::Clamp(Component->SkyOcclusionStrength, 0.0f, 1.0f);
+    SkyOcclusionColor = Component->SkyOcclusionColor;
+    SkyOcclusionColorReplaceWeight = FMath::Clamp(Component->SkyOcclusionColorReplaceWeight, 0.0f, 1.0f);
     // [DeferredToon] Resolve authored bands once per proxy update, not per pixel.
     static_assert(MaxLightBands == UDeferredToonVolumeComponent::MaxLightBands);
     for (int32 Index = 0; Index < MaxLightBands; ++Index)

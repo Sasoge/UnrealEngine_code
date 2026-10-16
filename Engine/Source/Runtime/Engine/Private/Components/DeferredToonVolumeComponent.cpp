@@ -240,6 +240,11 @@ void UDeferredToonVolumeComponent::SetOverrideIndirectDiffuse(bool NewValue) { D
 void UDeferredToonVolumeComponent::SetIndirectDiffuseIntensity(float NewValue) { DTOON_SET(IndirectDiffuseIntensity, FMath::Max(NewValue, 0.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetIndirectDiffuseColor(FLinearColor NewValue) { DTOON_SET(IndirectDiffuseColor, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetIndirectDiffuseColorReplaceWeight(float NewValue) { DTOON_SET(IndirectDiffuseColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+// [DeferredToon] Sky occlusion controls.
+void UDeferredToonVolumeComponent::SetOverrideSkyOcclusion(bool NewValue) { DTOON_SET(bOverrideSkyOcclusion, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetSkyOcclusionStrength(float NewValue) { DTOON_SET(SkyOcclusionStrength, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetSkyOcclusionColor(FLinearColor NewValue) { DTOON_SET(SkyOcclusionColor, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetSkyOcclusionColorReplaceWeight(float NewValue) { DTOON_SET(SkyOcclusionColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTexture(UTexture2D* NewValue) { DTOON_SET(ShadowTexture, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTextureWeight(float NewValue) { DTOON_SET(ShadowTextureWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTextureTiling(FVector2D NewValue) { DTOON_SET(ShadowTextureTiling, NewValue, MarkRenderStateDirty()); }

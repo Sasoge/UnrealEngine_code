@@ -404,6 +404,8 @@ FLumenReflectionOnlyOutput GetLumenReflectionOnly(
 // [DeferredToon] Same texture contract as the Lumen diffuse provider.
 #if TOON_EXPORT_SKY_DIFFUSE
 RWTexture2D<float4> ToonSkyDiffuseOutput;
+// [DeferredToon] RGB before local AO; A visibility [0,1], -1 means unavailable.
+RWTexture2D<float4> ToonSkyDiffuseBeforeAOOutput;
 #endif
 
 void ReflectionEnvironmentSkyLighting(
@@ -424,6 +426,7 @@ void ReflectionEnvironmentSkyLighting(
 	OutColor = 0.0f;
 	#if TOON_EXPORT_SKY_DIFFUSE
 	ToonSkyDiffuseOutput[PixelPos] = 0.0f; // [DeferredToon] Unlit pixels are unavailable.
+	ToonSkyDiffuseBeforeAOOutput[PixelPos] = float4(0, 0, 0, -1);
 	#endif
 #if SUBSTRATE_OPAQUE_ROUGH_REFRACTION_ENABLED
 	OutOpaqueRoughRefractionSceneColor = 0.0f;
@@ -608,7 +611,15 @@ void ReflectionEnvironmentSkyLighting(
 		float3 TranslatedWorldPosition = mul(float4(GetScreenPositionForProjectionType(ScreenPosition, GBuffer.Depth), GBuffer.Depth, 1), View.ScreenToTranslatedWorld).xyz;
 		const float CloudVolumetricAOShadow = GetCloudVolumetricAOShadow(TranslatedWorldPosition);
 
+		// [DeferredToon] The split retains cloud shadowing in both lighting results.
+		#if TOON_EXPORT_SKY_DIFFUSE
+		float3 SkyBeforeAO;
+		float SkyVisibility;
+		float3 SkyLighting = CloudVolumetricAOShadow * SkyLightDiffuse(GBuffer, AmbientOcclusion, BufferUV, ScreenPosition, BentNormal, DiffuseColor, SkyBeforeAO, SkyVisibility);
+		SkyBeforeAO *= CloudVolumetricAOShadow;
+		#else
 		float3 SkyLighting = CloudVolumetricAOShadow * SkyLightDiffuse(GBuffer, AmbientOcclusion, BufferUV, ScreenPosition, BentNormal, DiffuseColor);
+		#endif
 
 		////////////////////////custom/////////////////
 		// Remove Toon Shading
@@ -628,6 +639,11 @@ void ReflectionEnvironmentSkyLighting(
 		// diffuse and occlusion. Capture before ReflectionEnvironment is added.
 		ToonSkyDiffuseOutput[PixelPos] = !bNeedsSeparateSubsurfaceLightAccumulation
 			? float4(SkyLighting, 1.0f) : 0.0f;
+		// [DeferredToon] Do not bypass custom Toon suppression or separate SSS/hair.
+		const bool bSplitValid = !bNeedsSeparateSubsurfaceLightAccumulation
+			&& ShadingModelID != SHADINGMODELID_TOON && ShadingModelID != SHADINGMODELID_HAIR;
+		ToonSkyDiffuseBeforeAOOutput[PixelPos] = bSplitValid
+			? float4(SkyBeforeAO, SkyVisibility) : float4(0, 0, 0, -1);
 		#endif
 	}
 

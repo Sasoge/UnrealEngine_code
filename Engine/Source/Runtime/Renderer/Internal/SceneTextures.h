@@ -166,6 +166,8 @@ struct FSceneTextures : public FMinimalSceneTextures
 	// [DeferredToon] Optional current-frame Lumen diffuse export. RGB is pre-exposed
 	// material-weighted diffuse; A is coverage (not radiance). Allocated by producer.
 	FRDGTextureRef ToonIndirectDiffuse{};
+	// [DeferredToon] Sky-only split: pre-exposed RGB before AO, A visibility; -1 invalid.
+	FRDGTextureRef ToonSkyDiffuseBeforeAO{};
 	////////////////End//////////////////
 
 	// Texture used by the quad overdraw debug view mode when enabled.

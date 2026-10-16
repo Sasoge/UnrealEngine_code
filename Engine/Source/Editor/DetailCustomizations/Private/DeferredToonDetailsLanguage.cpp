@@ -84,6 +84,11 @@ void Apply(bool bChinese)
         {TEXT("IndirectDiffuseIntensity"), TEXT("强度"), TEXT("1 保留原始强度；0 去除已分离的间接漫反射。")},
         {TEXT("IndirectDiffuseColor"), TEXT("颜色"), TEXT("线性空间乘色或替换色。颜色替换为 0 时白色为中性；最后仍经过 UE 曝光和色调映射。")},
         {TEXT("IndirectDiffuseColorReplaceWeight"), TEXT("颜色替换"), TEXT("0 对原生间接漫反射乘色；1 替换为指定颜色（包括零间接光表面）。材质底色影响只作用于替换部分。")},
+        // [DeferredToon] Sky occlusion is optional and has a compact collapsed section.
+        {TEXT("bOverrideSkyOcclusion"), TEXT("独立调整天光遮蔽"), TEXT("先启用独立调整间接漫反射。仅支持普通动态 SkyLight；Lumen 和不支持的像素保持原结果。")},
+        {TEXT("SkyOcclusionStrength"), TEXT("遮蔽强度"), TEXT("1 保留原生遮蔽；0 恢复局部 AO、弯曲法线和遮蔽染色应用前的天光漫反射。保留云遮蔽，不改变直接光阴影。")},
+        {TEXT("SkyOcclusionColor"), TEXT("遮蔽颜色"), TEXT("遮蔽区域的线性替换色，只改变间接漫反射，不给直接光和反射染色。最终仍经过曝光与色调映射。")},
+        {TEXT("SkyOcclusionColorReplaceWeight"), TEXT("颜色替换"), TEXT("0 保留间接光调色结果；1 按原生综合遮蔽程度和遮蔽强度混入遮蔽颜色。无遮挡处不变。")},
         {TEXT("OtherLightingWeight"), TEXT("保留其他光照"), TEXT("0 只输出处理后的直接漫反射；1 保留原画面减去直接漫反射后的其余贡献，包括间接光与高光。启用独立调整间接漫反射后，已分离部分改由间接光参数控制。这会影响最终看到的色板颜色。")},
         {TEXT("bUseLightBands"), TEXT("启用多档明暗"), TEXT("支持 2～8 档。关闭或不足两档时使用二分阈值。")},
         {TEXT("EffectiveLightThreshold"), TEXT("二分受光阈值"), TEXT("二分模式的受光分界。多档模式使用每档受光下限；调试视图 14、19、20 仍使用这个二分参考阈值。")},
@@ -157,7 +162,7 @@ void Apply(bool bChinese)
         {TEXT("ShadowChannel"), TEXT("6 - 艺术阴影通道")},
         {TEXT("BaseColor"), TEXT("7 - 材质底色")},
         {TEXT("WorldNormal"), TEXT("8 - 世界空间法线")},
-        {TEXT("AmbientOcclusion"), TEXT("9 - 环境遮蔽")},
+        {TEXT("AmbientOcclusion"), TEXT("9 - 屏幕空间 AO")},
         {TEXT("StyleMask"), TEXT("10 - 分层遮罩")},
         {TEXT("StyleColor"), TEXT("11 - 分层颜色")},
         {TEXT("Depth"), TEXT("12 - 线性深度")},
@@ -172,7 +177,10 @@ void Apply(bool bChinese)
         {TEXT("EffectiveLightResponse"), TEXT("23 - 有效受光响应")},
         {TEXT("LightBandValue"), TEXT("24 - 所选明暗档位（0 暗 / 1 亮）")},
         {TEXT("IndirectDiffuse"), TEXT("25 - 间接漫反射")},
-        {TEXT("IndirectDiffuseCoverage"), TEXT("26 - 间接漫反射可用范围")},
+        {TEXT("IndirectDiffuseCoverage"), TEXT("26 - 间接漫反射数据有效性")},
+        {TEXT("SkyDiffuseBeforeAO"), TEXT("27 - 天光漫反射（AO 前）")}, // [DeferredToon]
+        {TEXT("SkyOcclusion"), TEXT("28 - 天光综合遮蔽（白为无遮挡）")},
+        {TEXT("SkyOcclusionCoverage"), TEXT("29 - 天光遮蔽数据有效性")},
         {TEXT("ConsoleGlobal"), TEXT("跟随全局 / 控制台")},
     };
     TranslateEnum(TEXT("/Script/Engine.EDeferredToonDebugView"), Enum1, bChinese);
@@ -187,7 +195,7 @@ void Apply(bool bChinese)
         {TEXT("DirectLight"), TEXT("直接光")},
         {TEXT("NativeShadow"), TEXT("原生阴影")},
         {TEXT("ShadowChannel"), TEXT("艺术阴影通道")},
-        {TEXT("AmbientOcclusion"), TEXT("环境遮蔽")},
+        {TEXT("AmbientOcclusion"), TEXT("屏幕空间 AO")},
         {TEXT("BaseColor"), TEXT("材质底色")},
         {TEXT("WorldNormal"), TEXT("世界空间法线")},
         {TEXT("Roughness"), TEXT("粗糙度")},
@@ -199,6 +207,8 @@ void Apply(bool bChinese)
         {TEXT("EffectiveDirectLight"), TEXT("有效直接漫反射")},
         {TEXT("EffectiveLightResponse"), TEXT("有效受光响应")},
         {TEXT("IndirectDiffuse"), TEXT("间接漫反射")},
+        {TEXT("SkyDiffuseBeforeAO"), TEXT("天光漫反射（AO 前）")}, // [DeferredToon]
+        {TEXT("SkyOcclusion"), TEXT("天光综合遮蔽")},
         {TEXT("DeprecatedShadowBuffer"), TEXT("旧版阴影缓冲（已弃用）")},
     };
     TranslateEnum(TEXT("/Script/Engine.EDeferredToonStyleInputId"), Enum3, bChinese);

@@ -82,14 +82,19 @@ FSkyLightVisibilityData GetSkyLightVisibilityData(float3 SkyLightingNormal, cons
 	return SkyVisData;
 }
 
-float3 SkyLightDiffuse(FGBufferData GBuffer, float AmbientOcclusion, float2 BufferUV, float2 ScreenPosition, float3 BentNormal, float3 DiffuseColor)
+// [DeferredToon] Optional split outputs; the wrapper below preserves all native callers.
+float3 SkyLightDiffuse(FGBufferData GBuffer, float AmbientOcclusion, float2 BufferUV, float2 ScreenPosition, float3 BentNormal, float3 DiffuseColor, out float3 BeforeAO, out float Visibility)
 {
 	float2 UV = BufferUV;
 	float3 Lighting = 0;
+	BeforeAO = 0; // [DeferredToon] Pre-exposed material response before local sky AO.
 
 	float3 SkyLightingNormal = GetClearCoatBottomNormal(GBuffer, GBuffer.WorldNormal);
 	FSkyLightVisibilityData SkyVisData = GetSkyLightVisibilityData(SkyLightingNormal, GBuffer.WorldNormal, GBuffer.GBufferAO, AmbientOcclusion, BentNormal);
 
+	// [DeferredToon] Combined DFAO/screen/material attenuation, not an irradiance ratio.
+	Visibility = saturate(SkyVisData.SkyDiffuseLookUpMul);
+	float3 BeforeAONormal = SkyLightingNormal;
 	const float3 N = GBuffer.WorldNormal;
 	const float3 V = -normalize(mul(float3(ScreenPosition, 1), DFToFloat3x3(PrimaryView.ScreenToWorld)).xyz);
 	const float NoV = saturate(dot(V, N));
@@ -102,6 +107,7 @@ float3 SkyLightDiffuse(FGBufferData GBuffer, float AmbientOcclusion, float2 Buff
 		float3 SubsurfaceLookup = GetSkySHDiffuse(-GBuffer.WorldNormal) * View.SkyLightColor.rgb;
 		float3 SubsurfaceColor = ExtractSubsurfaceColor(GBuffer);
 		Lighting += SkyVisData.SkyDiffuseLookUpMul * SubsurfaceLookup * SubsurfaceColor;
+		BeforeAO += SubsurfaceLookup * SubsurfaceColor; // [DeferredToon] Same backface response, without local AO.
 	}
 
 	if (GBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE || GBuffer.ShadingModelID == SHADINGMODELID_PREINTEGRATED_SKIN)
@@ -118,6 +124,7 @@ float3 SkyLightDiffuse(FGBufferData GBuffer, float AmbientOcclusion, float2 Buff
 		DiffuseColor = EvaluateEnvHair(GBuffer, V, N, L /*out*/);
 		DiffuseWeight = 1.0f;
 		SkyVisData.SkyDiffuseLookUpNormal = L;
+		BeforeAONormal = L; // [DeferredToon] Hair is excluded by the split provider.
 	}
 
 	if (GBuffer.ShadingModelID == SHADINGMODELID_CLOTH)
@@ -146,8 +153,19 @@ float3 SkyLightDiffuse(FGBufferData GBuffer, float AmbientOcclusion, float2 Buff
 	// And accumulate the lighting
 	Lighting += (SkyVisData.SkyDiffuseLookUpMul * DiffuseLookup + SkyVisData.SkyDiffuseLookUpAdd) * DiffuseColor * DiffuseWeight;
 	Lighting *= View.PreExposure;
+	// [DeferredToon] Unchanged BRDF/material terms; remove only local sky occlusion.
+	BeforeAO += GetSkySHDiffuse(BeforeAONormal) * View.SkyLightColor.rgb * DiffuseColor * DiffuseWeight;
+	BeforeAO *= View.PreExposure;
 
 	//Lighting = (Texture2DSampleLevel(BentNormalAOTexture, BentNormalAOSampler, UV, 0).xyz);
 
 	return Lighting;
+}
+
+// [DeferredToon] Unused split calculations are optimized out of native permutations.
+float3 SkyLightDiffuse(FGBufferData GBuffer, float AmbientOcclusion, float2 BufferUV, float2 ScreenPosition, float3 BentNormal, float3 DiffuseColor)
+{
+	float3 BeforeAO;
+	float Visibility;
+	return SkyLightDiffuse(GBuffer, AmbientOcclusion, BufferUV, ScreenPosition, BentNormal, DiffuseColor, BeforeAO, Visibility);
 }
