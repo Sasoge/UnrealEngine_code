@@ -212,6 +212,7 @@ class FDiffuseIndirectCompositePS : public FGlobalShader
 
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, PassDebugOutput)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonIndirectDiffuseOutput) // [DeferredToon]
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonLumenDiffuseBeforeShortAOOutput) // [DeferredToon]
 
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float3>, OutOpaqueRoughRefractionSceneColor)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float3>, OutSubSurfaceSceneColor)
@@ -1332,6 +1333,16 @@ void FDeferredShadingSceneRenderer::RenderDiffuseIndirectAndAmbientOcclusion(
 			&& ViewPipelineState.DiffuseIndirectMethod == EDiffuseIndirectMethod::Lumen
 			&& DenoiserOutputs.Textures[0] && !Substrate::IsSubstrateEnabled()
 			&& Scene->HasAnyDeferredToonVolume();
+		// [DeferredToon] Allocate only for Lumen views with a real short-range AO provider.
+		const bool bExportShortAO = bExportToonDiffuse && ScreenBentNormalParameters.ShortRangeAOMode > 0;
+		if (bExportShortAO && !SceneTextures.ToonLumenDiffuseBeforeShortAO)
+		{
+			SceneTextures.ToonLumenDiffuseBeforeShortAO = GraphBuilder.CreateTexture(
+				FRDGTextureDesc::Create2D(SceneColorTexture->Desc.Extent, PF_FloatRGBA,
+					FClearValueBinding::Transparent, TexCreate_ShaderResource | TexCreate_UAV),
+				TEXT("DeferredToon.LumenDiffuseBeforeShortAO"));
+			AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(SceneTextures.ToonLumenDiffuseBeforeShortAO), FVector4f(0, 0, 0, -1));
+		}
 
 		bool bEnableCopyPass = (!RHISupportsDualSourceBlending(ShaderPlatform) || CVarDiffuseIndirectForceCopyPass.GetValueOnRenderThread()) 
 								&& DenoiserOutputs.Textures[0];
@@ -1373,6 +1384,8 @@ void FDeferredShadingSceneRenderer::RenderDiffuseIndirectAndAmbientOcclusion(
 			// [DeferredToon] RDG tracks the producer-to-volume dependency through this UAV.
 			PSParameters->ToonIndirectDiffuseOutput = bExportToonDiffuse
 				? GraphBuilder.CreateUAV(SceneTextures.ToonIndirectDiffuse) : nullptr;
+			PSParameters->ToonLumenDiffuseBeforeShortAOOutput = bExportShortAO
+				? GraphBuilder.CreateUAV(SceneTextures.ToonLumenDiffuseBeforeShortAO) : nullptr; // [DeferredToon]
 			PSParameters->Substrate = Substrate::BindSubstrateGlobalUniformParameters(View);
 			PSParameters->SceneTexturesStruct = SceneTextures.UniformBuffer;
 			PSParameters->AmbientOcclusionStaticFraction = FMath::Clamp(View.FinalPostProcessSettings.AmbientOcclusionStaticFraction, 0.0f, 1.0f);

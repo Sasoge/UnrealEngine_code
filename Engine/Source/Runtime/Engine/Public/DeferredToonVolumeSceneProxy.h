@@ -65,6 +65,9 @@ public:
     float SkyOcclusionStrength = 1.0f;
     FLinearColor SkyOcclusionColor = FLinearColor::Black;
     float SkyOcclusionColorReplaceWeight = 0.0f;
+    // [DeferredToon] Lumen short-range diffuse AO, independent from sky AO.
+    bool bOverrideLumenShortRangeAO = false;
+    float LumenShortRangeAOStrength = 1.0f;
     float ShadowTextureWeight = 1.0f;
     FVector2D ShadowTextureTiling = FVector2D(1.0, 1.0);
     FVector2D ShadowTextureOffset = FVector2D::ZeroVector;

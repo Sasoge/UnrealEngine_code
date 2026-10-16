@@ -56,6 +56,11 @@ uint bOverrideSkyOcclusion;
 float SkyOcclusionStrength;
 float4 SkyOcclusionColor;
 float SkyOcclusionColorReplaceWeight;
+// [DeferredToon] Raw short-range visibility is dimensionless; RGB is pre-exposed.
+Texture2D LumenDiffuseBeforeShortAOTexture;
+uint bLumenShortAOAvailable;
+uint bOverrideLumenShortRangeAO;
+float LumenShortRangeAOStrength;
 float ShadowTextureWeight;
 float2 ShadowTextureTiling;
 float2 ShadowTextureOffset;
@@ -313,6 +318,8 @@ void MainPS(
     // [DeferredToon] -1 is invalid, while zero visibility is a valid fully occluded surface.
     const float4 SkyBeforeAO = SkyDiffuseBeforeAOTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
     const bool bValidSkySplit = bValidIndirect && bSkyOcclusionAvailable != 0u && SkyBeforeAO.a >= 0.0f;
+    const float4 LumenBeforeShortAO = LumenDiffuseBeforeShortAOTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    const bool bValidLumenShortAO = bValidIndirect && bLumenShortAOAvailable != 0u && LumenBeforeShortAO.a >= 0.0f; // [DeferredToon]
 	const float EffectiveLitMask = EffectiveLight.a > 0.0f ? step(max(EffectiveLightThreshold, 0.0f), EffectiveLight.a) : 0.0f;
 	const float DirectLightMask = EffectiveLitMask;
 	const float NativeShadowMask = saturate(ShadowBufferTexture.SampleLevel(ShadowBufferSampler, UV, 0).r);
@@ -486,6 +493,18 @@ void MainPS(
         OutColor = float4((bValidIndirect ? 1.0f : 0.0f).xxx, 1.0f);
     }
     // [DeferredToon] Separate raw lighting, visibility and availability diagnostics.
+    else if (DebugView == 30) // [DeferredToon] Neutral white when unavailable; see view 32.
+    {
+        OutColor = float4((bValidLumenShortAO ? saturate(LumenBeforeShortAO.a) : 1.0f).xxx * PrimaryView.PreExposure, 1.0f);
+    }
+    else if (DebugView == 31)
+    {
+        OutColor = float4(bValidLumenShortAO ? max(LumenBeforeShortAO.rgb, 0.0f) : 0.0f, 1.0f);
+    }
+    else if (DebugView == 32)
+    {
+        OutColor = float4((bValidLumenShortAO ? 1.0f : 0.0f).xxx * PrimaryView.PreExposure, 1.0f);
+    }
     else if (DebugView == 27)
     {
         OutColor = float4(bValidSkySplit ? max(SkyBeforeAO.rgb, 0.0f) : 0.0f, 1.0f);
@@ -556,15 +575,20 @@ void MainPS(
                 // [DeferredToon] Interpolate actual pre/post-AO lighting, never divide by visibility.
                 // Budget scale matches the existing residual extraction under fog/later composition.
                 const bool bAdjustSkyAO = bOverrideSkyOcclusion != 0u && bValidSkySplit;
-                if (bAdjustSkyAO)
+                const bool bAdjustLumenAO = bOverrideLumenShortRangeAO != 0u && bValidLumenShortAO;
+                if (bAdjustSkyAO || bAdjustLumenAO)
                 {
                     const float3 RawIndirect = max(IndirectSample.rgb, 0.0f);
                     const float3 BudgetScale = float3(
                         RawIndirect.r > 1e-6f ? ExtractedIndirect.r / RawIndirect.r : 1.0f,
                         RawIndirect.g > 1e-6f ? ExtractedIndirect.g / RawIndirect.g : 1.0f,
                         RawIndirect.b > 1e-6f ? ExtractedIndirect.b / RawIndirect.b : 1.0f);
-                    NativeIndirect += (max(SkyBeforeAO.rgb, 0.0f) - RawIndirect) * BudgetScale
-                        * (1.0f - saturate(SkyOcclusionStrength)) * PrimaryView.OneOverPreExposure;
+                    // [DeferredToon] Providers are mutually exclusive. Interpolate actual
+                    // pre/post-AO diffuse, preserving colored multibounce and zero visibility.
+                    const float3 BeforeAO = bAdjustLumenAO ? LumenBeforeShortAO.rgb : SkyBeforeAO.rgb;
+                    const float Strength = bAdjustLumenAO ? LumenShortRangeAOStrength : SkyOcclusionStrength;
+                    NativeIndirect += (max(BeforeAO, 0.0f) - RawIndirect) * BudgetScale
+                        * (1.0f - saturate(Strength)) * PrimaryView.OneOverPreExposure;
                     NativeIndirect = max(NativeIndirect, 0.0f);
                 }
                 const float3 Tint = max(IndirectDiffuseColor.rgb, 0.0f);

@@ -85,6 +85,8 @@ void Apply(bool bChinese)
         {TEXT("IndirectDiffuseColor"), TEXT("颜色"), TEXT("线性空间乘色或替换色。颜色替换为 0 时白色为中性；最后仍经过 UE 曝光和色调映射。")},
         {TEXT("IndirectDiffuseColorReplaceWeight"), TEXT("颜色替换"), TEXT("0 对原生间接漫反射乘色；1 替换为指定颜色（包括零间接光表面）。材质底色影响只作用于替换部分。")},
         // [DeferredToon] Sky occlusion is optional and has a compact collapsed section.
+        {TEXT("bOverrideLumenShortRangeAO"), TEXT("独立调整短程 AO"), TEXT("先启用独立调整间接漫反射。仅控制 Lumen 独立短程漫反射遮蔽；保留追踪形成的 GI 暗影、直接光和高光。")},
+        {TEXT("LumenShortRangeAOStrength"), TEXT("短程 AO 强度"), TEXT("1 保留原生结果；0 移除独立短程漫反射 AO。无有效数据时保持原结果。间接光颜色替换为 1 时，会覆盖这部分照明差异。")},
         {TEXT("bOverrideSkyOcclusion"), TEXT("独立调整天光遮蔽"), TEXT("先启用独立调整间接漫反射。仅支持普通动态 SkyLight；Lumen 和不支持的像素保持原结果。")},
         {TEXT("SkyOcclusionStrength"), TEXT("遮蔽强度"), TEXT("1 保留原生遮蔽；0 恢复局部 AO、弯曲法线和遮蔽染色应用前的天光漫反射。保留云遮蔽，不改变直接光阴影。")},
         {TEXT("SkyOcclusionColor"), TEXT("遮蔽颜色"), TEXT("遮蔽区域的线性替换色，只改变间接漫反射，不给直接光和反射染色。最终仍经过曝光与色调映射。")},
@@ -181,6 +183,9 @@ void Apply(bool bChinese)
         {TEXT("SkyDiffuseBeforeAO"), TEXT("27 - 天光漫反射（AO 前）")}, // [DeferredToon]
         {TEXT("SkyOcclusion"), TEXT("28 - 天光综合遮蔽（白为无遮挡）")},
         {TEXT("SkyOcclusionCoverage"), TEXT("29 - 天光遮蔽数据有效性")},
+        {TEXT("LumenShortRangeAO"), TEXT("30 - Lumen 短程 AO（白为无遮挡）")},
+        {TEXT("LumenDiffuseBeforeShortAO"), TEXT("31 - Lumen 漫反射（短程 AO 前）")},
+        {TEXT("LumenShortRangeAOCoverage"), TEXT("32 - Lumen 短程 AO 数据有效性")},
         {TEXT("ConsoleGlobal"), TEXT("跟随全局 / 控制台")},
     };
     TranslateEnum(TEXT("/Script/Engine.EDeferredToonDebugView"), Enum1, bChinese);

@@ -203,6 +203,60 @@ if sky_split_run:
         ('sky-restored', [sky_only, lambda: debug(unreal.DeferredToonDebugView.SKY_OCCLUSION_COVERAGE)]),
     ]
 
+
+# [DeferredToon] Exercise both native short-AO encodings and graceful fallback.
+if '-toonlumenshortao' in unreal.SystemLibrary.get_command_line().lower():
+    out = Path(unreal.Paths.project_saved_dir()) / 'Automation/DeferredToonLumenShortAO'
+    out.mkdir(parents=True, exist_ok=True)
+    for actor in actors:
+        for component in actor.get_components_by_class(unreal.SkyLightComponent):
+            component.set_real_time_capture(False)
+            component.set_editor_property('source_type', unreal.SkyLightSourceType.SLS_SPECIFIED_CUBEMAP)
+            component.set_cubemap(unreal.load_asset('/Engine/MapTemplates/Sky/DaylightAmbientCubemap'))
+    for cmd in ['r.Lumen.ScreenProbeGather.ShortRangeAO 1',
+                'r.Lumen.ScreenProbeGather.ShortRangeAO.ApplyDuringIntegration 0',
+                'r.Lumen.ScreenProbeGather.ShortRangeAO.BentNormal 1',
+                'r.Lumen.ScreenProbeGather.ShortRangeAO.Temporal 1',
+                'r.Lumen.DiffuseIndirect.SSAO 0']:
+        command(cmd)
+    def short_neutral():
+        neutral()
+        apply('set_override_sky_occlusion', False)
+        apply('set_override_lumen_short_range_ao', True)
+        apply('set_lumen_short_range_ao_strength', 1)
+    def d(number):
+        debug(unreal.DeferredToonDebugView.CONSOLE_GLOBAL)
+        command('r.Toon.DeferredVolumes.DebugView ' + str(number))
+    phases = [
+        ('legacy', [neutral, output, lambda: apply('set_override_lumen_short_range_ao', False)]),
+        ('neutral', [short_neutral]),
+        ('removed', [lambda: apply('set_lumen_short_range_ao_strength', 0)]),
+        ('half', [lambda: apply('set_lumen_short_range_ao_strength', .5)]),
+        ('native-final', [lambda: d(25)]),
+        ('before-ao', [lambda: d(31)]),
+        ('before-ao-exposure', [lambda: command('r.EyeAdaptation.PreExposureOverride 4')]),
+        ('before-ao-restored', [lambda: command('r.EyeAdaptation.PreExposureOverride 1')]),
+        ('visibility', [lambda: d(30)]),
+        ('visibility-exposure', [lambda: command('r.EyeAdaptation.PreExposureOverride 4')]),
+        ('validity', [lambda: command('r.EyeAdaptation.PreExposureOverride 1'), lambda: d(32)]),
+        ('before-ao-copy', [lambda: d(31), lambda: command('r.DiffuseIndirectForceCopyPass 1')]),
+        ('bands-removed', [lambda: command('r.DiffuseIndirectForceCopyPass 0'), lambda: d(24), lambda: apply('set_lumen_short_range_ao_strength', 0)]),
+        ('bands-native', [lambda: apply('set_lumen_short_range_ao_strength', 1)]),
+        ('visibility-tsr', [lambda: d(30), lambda: command('r.AntiAliasingMethod 4'), lambda: command('r.ScreenPercentage 67')]),
+        ('scalar-visibility', [lambda: command('r.ScreenPercentage 100'), lambda: command('r.Lumen.ScreenProbeGather.ShortRangeAO.BentNormal 0')]),
+        ('scalar-validity', [lambda: d(32)]),
+        ('disabled-validity', [lambda: command('r.Lumen.ScreenProbeGather.ShortRangeAO 0')]),
+        ('disabled-legacy', [lambda: d(0), lambda: apply('set_override_lumen_short_range_ao', False)]),
+        ('disabled-override', [lambda: apply('set_override_lumen_short_range_ao', True), lambda: apply('set_lumen_short_range_ao_strength', 0)]),
+        ('integration-validity', [lambda: command('r.Lumen.ScreenProbeGather.ShortRangeAO 1'), lambda: command('r.Lumen.ScreenProbeGather.ShortRangeAO.ApplyDuringIntegration 1'), lambda: d(32)]),
+        ('integration-legacy', [lambda: d(0), lambda: apply('set_override_lumen_short_range_ao', False)]),
+        ('integration-override', [lambda: apply('set_override_lumen_short_range_ao', True)]),
+        ('restored-validity', [lambda: command('r.Lumen.ScreenProbeGather.ShortRangeAO.ApplyDuringIntegration 0'), lambda: command('r.Lumen.ScreenProbeGather.ShortRangeAO.BentNormal 1'), lambda: d(32)]),
+        ('sky-validity', [sky_only]),
+        ('sky-legacy', [lambda: d(0), lambda: apply('set_override_lumen_short_range_ao', False)]),
+        ('sky-override', [lambda: apply('set_override_lumen_short_range_ao', True)]),
+    ]
+
 phase = 0
 frame = 0
 capture = None

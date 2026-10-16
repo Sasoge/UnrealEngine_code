@@ -111,3 +111,8 @@ Output = GradedDirect + R * OtherLightingWeight
 日志位于工作区 `C:/Users/ASUS/Documents/Codex/2026-10-02/qin/outputs/`：`indirect-diffuse-build*.log`、`indirect-diffuse-d3d12-final.log`、`indirect-diffuse-image-check.log`、`indirect-diffuse-regression.log`。图像在测试工程 `Saved/Automation/DeferredToonIndirect`；均不作为工程资产提交。
 
 **SM5 状态：未完成验证。** 另起 D3D11/SM5 测试进程后触发较大范围的冷缓存编译，十多分钟后仍在编译、尚未进入场景；已主动停止该测试及其子编译进程。已生成缓存保留，不将“过程中未看到错误”当作通过。日志 `indirect-diffuse-sm5.log`；可用同一验证脚本配合 `-d3d11 -ToonIndirectSkyOnly` 继续检查。测试场景资产没有保存，用户原来的 GI 覆盖设置仍保持 None。
+
+
+## Lumen 短程 AO 独立控制（2026-10-16）
+
+新增 [Lumen 短程 AO 第一阶段](deferred-toon-lumen-short-range-ao.md)：中英界面的独立开关与 0—1 强度、调试视图 30—32；保留原生 GI 暗影。与普通 SkyLight 的天光遮蔽分开，按有效 provider 工作。默认关闭，既有资产保持原效果。

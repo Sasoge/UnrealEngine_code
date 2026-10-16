@@ -198,3 +198,8 @@ Output = lerp(Cl, Cs, BinaryShadow) * B * PreExposure
 - 改变 Style 层后，基础底色和 ToonRecompose 输出平均差异分别约 0.114、0.118（8 位显示值，时序边缘容差内）；Preview 的 RGB 与 R 通道输出有预期的彩色／灰度区别。已查看纹理和通道截图。
 
 以上日志和 `cleanup-*.png` 位于工作区 `C:/Users/ASUS/Documents/Codex/2026-10-02/qin/outputs`。首次通道截图测试因 Python 数组元素的结构体副本未写回而失败，改为显式构造并写入新结构体后重跑通过；未为通过测试而修改通道算法。SM5、Hair/Substrate 专项画面与大规模性能不在本轮验证范围内。未保存测试场景资产，未自动提交或推送 Git。
+
+
+## Lumen 短程 AO 独立控制（2026-10-16）
+
+新增 [Lumen 短程 AO 第一阶段](deferred-toon-lumen-short-range-ao.md)：中英界面的独立开关与 0—1 强度、调试视图 30—32；保留原生 GI 暗影。与普通 SkyLight 的天光遮蔽分开，按有效 provider 工作。默认关闭，既有资产保持原效果。

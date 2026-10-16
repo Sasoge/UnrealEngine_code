@@ -243,6 +243,9 @@ void UDeferredToonVolumeComponent::SetIndirectDiffuseColorReplaceWeight(float Ne
 // [DeferredToon] Sky occlusion controls.
 void UDeferredToonVolumeComponent::SetOverrideSkyOcclusion(bool NewValue) { DTOON_SET(bOverrideSkyOcclusion, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetSkyOcclusionStrength(float NewValue) { DTOON_SET(SkyOcclusionStrength, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+// [DeferredToon] Update renderer on Blueprint/runtime authoring changes.
+void UDeferredToonVolumeComponent::SetOverrideLumenShortRangeAO(bool NewValue) { DTOON_SET(bOverrideLumenShortRangeAO, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetLumenShortRangeAOStrength(float NewValue) { DTOON_SET(LumenShortRangeAOStrength, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetSkyOcclusionColor(FLinearColor NewValue) { DTOON_SET(SkyOcclusionColor, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetSkyOcclusionColorReplaceWeight(float NewValue) { DTOON_SET(SkyOcclusionColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetShadowTexture(UTexture2D* NewValue) { DTOON_SET(ShadowTexture, NewValue, MarkRenderStateDirty()); }

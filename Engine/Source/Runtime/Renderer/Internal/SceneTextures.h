@@ -168,6 +168,8 @@ struct FSceneTextures : public FMinimalSceneTextures
 	FRDGTextureRef ToonIndirectDiffuse{};
 	// [DeferredToon] Sky-only split: pre-exposed RGB before AO, A visibility; -1 invalid.
 	FRDGTextureRef ToonSkyDiffuseBeforeAO{};
+	// [DeferredToon] Lumen RGB before short AO, alpha raw visibility; -1 invalid.
+	FRDGTextureRef ToonLumenDiffuseBeforeShortAO{};
 	////////////////End//////////////////
 
 	// Texture used by the quad overdraw debug view mode when enabled.

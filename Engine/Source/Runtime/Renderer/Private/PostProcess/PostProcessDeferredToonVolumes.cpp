@@ -25,7 +25,7 @@ namespace
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
 		// [DeferredToon] View 20 previews the new independent two-band output mask.
-		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light), 25 indirect diffuse (Lumen or dynamic sky), 26 indirect availability, 27 sky diffuse before AO, 28 sky combined AO (white=unoccluded), 29 sky split availability."),
+		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light), 25 indirect diffuse (Lumen or dynamic sky), 26 indirect availability, 27 sky diffuse before AO, 28 sky combined AO (white=unoccluded), 29 sky split availability, 30 Lumen short AO, 31 Lumen diffuse before short AO, 32 Lumen short AO availability."),
 		ECVF_RenderThreadSafe);
 
 	class FDeferredToonVolumePS : public FGlobalShader
@@ -94,6 +94,11 @@ namespace
 			SHADER_PARAMETER(float, SkyOcclusionStrength)
 			SHADER_PARAMETER(FVector4f, SkyOcclusionColor)
 			SHADER_PARAMETER(float, SkyOcclusionColorReplaceWeight)
+			// [DeferredToon] One packed, shared RT for native Lumen short-range AO.
+			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, LumenDiffuseBeforeShortAOTexture)
+			SHADER_PARAMETER(uint32, bLumenShortAOAvailable)
+			SHADER_PARAMETER(uint32, bOverrideLumenShortRangeAO)
+			SHADER_PARAMETER(float, LumenShortRangeAOStrength)
 			SHADER_PARAMETER(float, ShadowTextureWeight)
 			SHADER_PARAMETER(FVector2f, ShadowTextureTiling)
 			SHADER_PARAMETER(FVector2f, ShadowTextureOffset)
@@ -159,7 +164,7 @@ namespace
 		// control.  255 preserves the legacy global console variable path.
 		const uint32 DebugView = Volume.DebugView == 255u
 			? uint32(GetDeferredToonVolumeDebugView())
-			: FMath::Min<uint32>(Volume.DebugView, 29u); // [DeferredToon] Band preview appended; existing IDs preserved.
+			: FMath::Min<uint32>(Volume.DebugView, 32u); // [DeferredToon] Band preview appended; existing IDs preserved.
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial
@@ -240,6 +245,12 @@ namespace
         PassParameters->SkyOcclusionStrength = Volume.SkyOcclusionStrength;
         PassParameters->SkyOcclusionColor = FVector4f(Volume.SkyOcclusionColor.R, Volume.SkyOcclusionColor.G, Volume.SkyOcclusionColor.B, 1);
         PassParameters->SkyOcclusionColorReplaceWeight = Volume.SkyOcclusionColorReplaceWeight;
+        // [DeferredToon] Both resource presence and pixel alpha are required.
+        const FRDGTextureRef LumenSplitTexture = View.GetSceneTextures().ToonLumenDiffuseBeforeShortAO;
+        PassParameters->bLumenShortAOAvailable = LumenSplitTexture && HasBeenProduced(LumenSplitTexture) ? 1u : 0u;
+        PassParameters->LumenDiffuseBeforeShortAOTexture = PassParameters->bLumenShortAOAvailable ? LumenSplitTexture : GSystemTextures.GetBlackDummy(GraphBuilder);
+        PassParameters->bOverrideLumenShortRangeAO = Volume.bOverrideLumenShortRangeAO ? 1u : 0u;
+        PassParameters->LumenShortRangeAOStrength = Volume.LumenShortRangeAOStrength;
 		PassParameters->ShadowTextureWeight = Volume.ShadowTextureWeight;
 		PassParameters->ShadowTextureTiling = FVector2f(Volume.ShadowTextureTiling);
 		PassParameters->ShadowTextureOffset = FVector2f(Volume.ShadowTextureOffset);
@@ -271,7 +282,7 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 29); // [DeferredToon] Appended indirect diffuse diagnostics.
+	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 32); // [DeferredToon] Appended indirect diffuse diagnostics.
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(

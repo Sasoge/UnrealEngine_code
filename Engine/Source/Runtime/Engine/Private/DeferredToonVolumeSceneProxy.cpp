@@ -43,6 +43,8 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     SkyOcclusionStrength = FMath::Clamp(Component->SkyOcclusionStrength, 0.0f, 1.0f);
     SkyOcclusionColor = Component->SkyOcclusionColor;
     SkyOcclusionColorReplaceWeight = FMath::Clamp(Component->SkyOcclusionColorReplaceWeight, 0.0f, 1.0f);
+    bOverrideLumenShortRangeAO = Component->bOverrideLumenShortRangeAO; // [DeferredToon]
+    LumenShortRangeAOStrength = FMath::Clamp(Component->LumenShortRangeAOStrength, 0.0f, 1.0f);
     // [DeferredToon] Resolve authored bands once per proxy update, not per pixel.
     static_assert(MaxLightBands == UDeferredToonVolumeComponent::MaxLightBands);
     for (int32 Index = 0; Index < MaxLightBands; ++Index)

@@ -347,6 +347,10 @@ FSubstrateDeferredLighting SubstrateIndirectLighting(
 // [DeferredToon] Separate from native render targets: dual-source slots are not MRTs.
 #if TOON_EXPORT_INDIRECT_DIFFUSE
 RWTexture2D<float4> ToonIndirectDiffuseOutput;
+// [DeferredToon] Only the separate Lumen short-range term is removed; GI remains.
+#if DIM_APPLY_DIFFUSE_INDIRECT == DIM_APPLY_DIFFUSE_INDIRECT_SCREEN_PROBE_GATHER && DIM_SCREEN_BENT_NORMAL_MODE > 0
+RWTexture2D<float4> ToonLumenDiffuseBeforeShortAOOutput;
+#endif
 #endif
 
 void MainPS(
@@ -400,6 +404,8 @@ void MainPS(
 	OutAddColor = 0;
 	{
 		FDirectLighting IndirectLighting = (FDirectLighting)0;
+		// [DeferredToon] Capture before multiplying native multibounce AO, not by division.
+		float3 ToonDiffuseBeforeShortAO = 0;
 
 		if (IsValid(Material))
 		{
@@ -603,6 +609,8 @@ void MainPS(
 			#endif
 
 				IndirectLighting.Diffuse = (DiffuseIndirectLighting * DiffuseColor + BackfaceDiffuseIndirectLighting) * Occlusion.DiffuseOcclusion * EnergyPreservationFactor;
+				// [DeferredToon] Preserve material response, energy conservation and traced GI.
+				ToonDiffuseBeforeShortAO = (DiffuseIndirectLighting * DiffuseColor + BackfaceDiffuseIndirectLighting) * EnergyPreservationFactor;
 				///////////////////////////custom/////////////////////////////
 				// Toon Lumen
 				
@@ -632,6 +640,8 @@ void MainPS(
 					float3 ToonOcclusion = lerp(float3(1.0f, 1.0f, 1.0f), Occlusion.DiffuseOcclusion, DiffuseOcclusion);
 
 					IndirectLighting.Diffuse =  (LerpDiffuse * DiffuseColor + BackfaceDiffuseIndirectLighting) * ToonOcclusion;
+					// [DeferredToon] Keep the existing Toon Lumen color/brightness flattening.
+					ToonDiffuseBeforeShortAO = LerpDiffuse * DiffuseColor + BackfaceDiffuseIndirectLighting;
 				}
 				//////////////////////////////////end///////////////////////
 				IndirectLighting.Transmission = 0;
@@ -656,6 +666,18 @@ void MainPS(
 		const bool bToonDiffuseValid = IsValid(Material) && !Material.bNeedsSeparateLightAccumulation;
 		ToonIndirectDiffuseOutput[PixelPos] = bToonDiffuseValid
 			? float4(IndirectLighting.Diffuse, 1.0f) : 0.0f;
+		#if DIM_APPLY_DIFFUSE_INDIRECT == DIM_APPLY_DIFFUSE_INDIRECT_SCREEN_PROBE_GATHER && DIM_SCREEN_BENT_NORMAL_MODE > 0
+		// [DeferredToon] A is raw short-range visibility; -1 marks unsupported pixels.
+		// This scalar is diagnostic, not the material-dependent RGB multibounce factor.
+		#if DIM_SCREEN_BENT_NORMAL_MODE == 2
+		const float ToonShortVisibility = saturate(length(UnpackScreenBentNormal(ShortRangeAOTexture[uint3(PixelPos, 0)])));
+		#else
+		const float ToonShortVisibility = saturate(ShortRangeAOTexture[uint3(PixelPos, 0)]);
+		#endif
+		const bool bShortSplitValid = bToonDiffuseValid && Material.GBufferData.ShadingModelID != SHADINGMODELID_HAIR;
+		ToonLumenDiffuseBeforeShortAOOutput[PixelPos] = bShortSplitValid
+			? float4(ToonDiffuseBeforeShortAO, ToonShortVisibility) : float4(0, 0, 0, -1);
+		#endif
 		#endif
 		IndirectLighting.Specular *= GetSSSCheckerboadSpecularScale(PixelPos, Material.bNeedsSeparateLightAccumulation);
 		IndirectLighting.Specular = 0;
