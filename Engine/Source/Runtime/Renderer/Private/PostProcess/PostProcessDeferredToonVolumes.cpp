@@ -29,7 +29,7 @@ namespace
 
     TAutoConsoleVariable<float> CVarDeferredToonAOFilterRadius(
         TEXT("r.Toon.DeferredVolumes.AOFilterRadius"), 8.0f,
-        TEXT("Geometry-aware AO filter radius in input render pixels before hard thresholding (0-8, default 8). Zero disables. No temporal history; raw AO views remain unchanged."),
+        TEXT("Geometry-aware AO filter radius in input render pixels before hard thresholding (0-8, default 8). Zero disables. Zero also bypasses temporal stabilization; raw AO views remain unchanged."),
         ECVF_RenderThreadSafe);
 
 	TAutoConsoleVariable<int32> CVarDeferredToonVolumesDebugView(
@@ -44,14 +44,18 @@ namespace
         TEXT("Remove tiny dark AO features with geometry-aware hard-mask opening. 0 disables; 1 enables (default)."), ECVF_RenderThreadSafe);
     TAutoConsoleVariable<int32> CVarDeferredToonAOFilterDebug(
         TEXT("r.Toon.DeferredVolumes.AOFilterDebug"), 0,
-        TEXT("Override view 38 only: 0 hard AO, 1 filtered continuous visibility, 2 filter support, 3 depth-derived normals."), ECVF_RenderThreadSafe);
+        TEXT("Override view 38 only: 0 hard AO, 1 filtered continuous visibility, 2 filter support, 3 depth-derived normals, 4 accepted temporal history."), ECVF_RenderThreadSafe);
+
+    TAutoConsoleVariable<float> CVarDeferredToonAOHysteresis(
+        TEXT("r.Toon.DeferredVolumes.AOHysteresis"), 0.04f,
+        TEXT("Hard AO temporal hysteresis half-width (0-0.2, default 0.04). Zero disables history. Reprojects surface state; does not blend RGB or binary masks."), ECVF_RenderThreadSafe);
 
     class FDeferredToonAOFilterPS : public FGlobalShader
     {
     public:
         DECLARE_GLOBAL_SHADER(FDeferredToonAOFilterPS);
         SHADER_USE_PARAMETER_STRUCT(FDeferredToonAOFilterPS, FGlobalShader);
-        class FStage : SHADER_PERMUTATION_INT("AO_FILTER_STAGE", 5);
+        class FStage : SHADER_PERMUTATION_INT("AO_FILTER_STAGE", 6);
         using FPermutationDomain = TShaderPermutationDomain<FStage>;
         static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
         {
@@ -72,6 +76,10 @@ namespace
             SHADER_PARAMETER(float, AOFilterRadius)
             SHADER_PARAMETER(float, AOFilterConservatism)
             SHADER_PARAMETER(float, AOThreshold)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOHistoryTexture)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOHistoryGeometryTexture)
+            SHADER_PARAMETER(uint32, bAOHistoryValid)
+            SHADER_PARAMETER(float, AOHysteresis)
             SHADER_PARAMETER(FIntPoint, AOFilterDirection)
             RENDER_TARGET_BINDING_SLOTS()
         END_SHADER_PARAMETER_STRUCT()
@@ -87,7 +95,7 @@ namespace
     static FRDGTextureRef AddAOStage(FRDGBuilder& GraphBuilder, const FViewInfo& View,
         const FScreenPassTexture& Input, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures,
         int32 Stage, const FDeferredToonAOTextures& AO, FRDGTextureRef Mask = nullptr,
-        FIntPoint Direction = FIntPoint::ZeroValue, float Threshold = 0.8f, FRDGTextureRef SecondTarget = nullptr)
+        FIntPoint Direction = FIntPoint::ZeroValue, float Threshold = 0.8f, FRDGTextureRef SecondTarget = nullptr, const FDeferredToonAOHistory* History = nullptr)
     {
         const auto& Textures = View.GetSceneTextures();
         const FRDGTextureRef Black = GSystemTextures.GetBlackDummy(GraphBuilder);
@@ -105,12 +113,16 @@ namespace
         P->AOGeometryTexture = AO.Geometry ? AO.Geometry : Black;
         P->AOMomentsTexture = AO.Moments ? AO.Moments : Black;
         P->AOMaskTexture = Mask ? Mask : Black;
+        P->bAOHistoryValid = History != nullptr;
+        P->AOHistoryTexture = History ? GraphBuilder.RegisterExternalTexture(History->State) : Black;
+        P->AOHistoryGeometryTexture = History ? GraphBuilder.RegisterExternalTexture(View.PrevViewInfo.DeferredToonAOGeometry) : Black;
+        P->AOHysteresis = FMath::Clamp(CVarDeferredToonAOHysteresis.GetValueOnRenderThread(), 0.0f, 0.2f);
         P->AOFilterDirection = Direction;
         P->AOFilterRadius = FMath::Clamp(CVarDeferredToonAOFilterRadius.GetValueOnRenderThread(), 0.0f, 8.0f);
         P->AOFilterConservatism = FMath::Clamp(CVarDeferredToonAOFilterConservatism.GetValueOnRenderThread(), 0.0f, 2.0f);
         P->AOThreshold = Threshold;
         const FRDGTextureRef Output = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(
-            Input.Texture->Desc.Extent, Stage == 0 ? PF_FloatRGBA : (Stage == 1 ? PF_A32B32G32R32F : PF_R16F), FClearValueBinding::None,
+            Input.Texture->Desc.Extent, Stage == 0 ? PF_FloatRGBA : ((Stage == 1 || Stage == 5) ? PF_A32B32G32R32F : PF_R16F), FClearValueBinding::None,
             TexCreate_ShaderResource | TexCreate_RenderTargetable), TEXT("DeferredToon.AOSpatial"));
         P->RenderTargets[0] = FRenderTargetBinding(Output, ERenderTargetLoadAction::ENoAction);
         if (SecondTarget) { P->RenderTargets[1] = FRenderTargetBinding(SecondTarget, ERenderTargetLoadAction::ENoAction); }
@@ -141,6 +153,39 @@ namespace
         AO.Moments = AddAOStage(GraphBuilder, View, Input, SceneTextures, 1, AO, nullptr, FIntPoint(1,0));
         AO.Moments = AddAOStage(GraphBuilder, View, Input, SceneTextures, 1, AO, nullptr, FIntPoint(0,1));
         return AO;
+    }
+
+    static FRDGTextureRef AddAOTemporal(FRDGBuilder& GraphBuilder, const FViewInfo& View,
+        const FScreenPassTexture& Input, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures,
+        const FDeferredToonVolumeSceneProxy& Volume, const FDeferredToonAOTextures& AO, FRDGTextureRef Mask)
+    {
+        const float Hysteresis = FMath::Clamp(CVarDeferredToonAOHysteresis.GetValueOnRenderThread(), 0.0f, 0.2f);
+        if (!View.ViewState || Hysteresis <= 0) { return Mask; }
+        const FVector4f Settings(CVarDeferredToonAOFilterRadius.GetValueOnRenderThread(),
+            CVarDeferredToonAOFilterConservatism.GetValueOnRenderThread(), Hysteresis,
+            float(CVarDeferredToonAOCleanup.GetValueOnRenderThread() != 0));
+        const auto* Previous = View.PrevViewInfo.DeferredToonAOHistories.Find(Volume.GetStableSortPath());
+        const FDeferredToonAOHistory* History = Previous ? Previous->Get() : nullptr;
+        if (View.bCameraCut || View.bPrevTransformsReset || !History || !History->State
+            || !View.PrevViewInfo.DeferredToonAOGeometry || History->ViewRect != Input.ViewRect
+            || History->State->GetDesc().Extent != Input.Texture->Desc.Extent
+            || History->FilterSettings != Settings || History->Threshold != Volume.IndirectOcclusionThreshold)
+        {
+            History = nullptr;
+        }
+        const FRDGTextureRef State = AddAOStage(GraphBuilder, View, Input, SceneTextures, 5, AO, Mask,
+            FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold, nullptr, History);
+        if (!View.bStatePrevViewInfoIsReadOnly)
+        {
+            auto Next = MakeShared<FDeferredToonAOHistory>();
+            Next->ViewRect = Input.ViewRect;
+            Next->FilterSettings = Settings;
+            Next->Threshold = Volume.IndirectOcclusionThreshold;
+            // Shared pointer keeps extraction destinations stable when the map grows.
+            View.ViewState->PrevFrameViewInfo.DeferredToonAOHistories.Add(Volume.GetStableSortPath(), Next);
+            GraphBuilder.QueueTextureExtraction(State, &Next->State);
+        }
+        return State;
     }
 
     static bool NeedsHardAO(const FDeferredToonVolumeSceneProxy& Volume, uint32 DebugView)
@@ -399,12 +444,13 @@ namespace
                 HardMask = AddAOStage(GraphBuilder, View, Input, SceneTextures, 3, SharedAO, HardMask);
                 HardMask = AddAOStage(GraphBuilder, View, Input, SceneTextures, 4, SharedAO, HardMask, FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold);
             }
+            HardMask = AddAOTemporal(GraphBuilder, View, Input, SceneTextures, Volume, SharedAO, HardMask);
         }
         PassParameters->bFilteredAOAvailable = HardMask ? 1u : 0u;
         PassParameters->AOMaskTexture = HardMask ? HardMask : GSystemTextures.GetBlackDummy(GraphBuilder);
         PassParameters->AOMomentsTexture = SharedAO.Moments ? SharedAO.Moments : GSystemTextures.GetBlackDummy(GraphBuilder);
         PassParameters->AOGeometryTexture = SharedAO.Geometry ? SharedAO.Geometry : GSystemTextures.GetBlackDummy(GraphBuilder);
-        PassParameters->AOFilterDebug = FMath::Clamp(CVarDeferredToonAOFilterDebug.GetValueOnRenderThread(), 0, 3);
+        PassParameters->AOFilterDebug = FMath::Clamp(CVarDeferredToonAOFilterDebug.GetValueOnRenderThread(), 0, 4);
         PassParameters->bUnifiedIndirectOcclusion = Volume.bUnifiedIndirectOcclusion ? 1u : 0u; // [DeferredToon]
 		PassParameters->ShadowTextureWeight = Volume.ShadowTextureWeight;
 		PassParameters->ShadowTextureTiling = FVector2f(Volume.ShadowTextureTiling);
@@ -463,6 +509,11 @@ FScreenPassTextureSlice AddDeferredToonVolumePass(
         if (Volume && NeedsHardAO(*Volume, Volume->DebugView == 255u ? uint32(GetDeferredToonVolumeDebugView()) : Volume->DebugView))
         {
             SharedAO = AddAOFilter(GraphBuilder, View, OriginalSceneColor, Inputs.SceneTextures);
+            if (SharedAO.Geometry && View.ViewState && !View.bStatePrevViewInfoIsReadOnly
+                && CVarDeferredToonAOHysteresis.GetValueOnRenderThread() > 0)
+            {
+                GraphBuilder.QueueTextureExtraction(SharedAO.Geometry, &View.ViewState->PrevFrameViewInfo.DeferredToonAOGeometry);
+            }
             break;
         }
     }

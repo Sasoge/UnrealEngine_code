@@ -3,7 +3,7 @@
 #include "PostProcessCommon.ush"
 #include "ScreenPass.ush"
 
-// [DeferredToon] Spatial-only AO processing. Never consume shaded RGB or material normals.
+// [DeferredToon] Geometry-aware AO filtering and reprojected binary state. Never consume shaded RGB or material normals.
 SCREEN_PASS_TEXTURE_VIEWPORT(Input)
 Texture2D IndirectDiffuseTexture;
 Texture2D SkyDiffuseBeforeAOTexture;
@@ -17,6 +17,10 @@ float AOFilterRadius;
 float AOFilterConservatism;
 float AOThreshold;
 int2 AOFilterDirection;
+Texture2D AOHistoryTexture;
+Texture2D AOHistoryGeometryTexture;
+uint bAOHistoryValid;
+float AOHysteresis;
 
 bool Inside(float2 UV)
 {
@@ -60,6 +64,60 @@ float HardMask(float2 UV)
     if (M.a == 0) { return 1; }
     const float Visibility = saturate(M.r + AOFilterConservatism * sqrt(max(M.g - M.r*M.r, 0)));
     return step(saturate(AOThreshold), Visibility);
+}
+
+// Reconstruct in the previous translated coordinate system for a plane-distance
+// test. Both points use the same origin, avoiding large-world precision loss.
+float3 PrevPosition(float2 Screen, float DeviceZ)
+{
+    const float Depth = ConvertFromDeviceZ(DeviceZ);
+    return mul(float4(GetScreenPositionForProjectionType(Screen, Depth), Depth, 1), View.PrevScreenToTranslatedWorld).xyz;
+}
+
+bool PreviousMask(float2 UV, float DeviceZ, float4 G, out float Mask)
+{
+    Mask = 0;
+    if (bAOHistoryValid == 0 || G.a == 0 || DeviceZ <= 0) { return false; }
+    const float2 Screen = (UV - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy;
+    // Use the jitter-aware matrix for camera motion; UE velocity excludes jitter.
+    const float2 NoJitter = Screen - View.TemporalAAJitter.xy;
+    const float4 PrevClip = mul(float4(Screen, DeviceZ, 1), View.ClipToPrevClipWithAA);
+    if (PrevClip.w <= 0) { return false; }
+    float3 PrevScreen = PrevClip.xyz / PrevClip.w;
+    bool MovingSurface = false;
+    const float4 Encoded = SceneTexturesStruct.GBufferVelocityTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    if (Encoded.x > 0)
+    {
+        const float3 Velocity = DecodeVelocityFromTexture(Encoded);
+#if VELOCITY_ENCODE_DEPTH
+        float3 MotionPrevious = float3(NoJitter, DeviceZ) - Velocity;
+        MotionPrevious.xy += View.TemporalAAJitter.zw;
+        const float2 ObjectMotion = (MotionPrevious.xy - PrevScreen.xy) * Input_ViewportSize * 0.5f;
+        MovingSurface = dot(ObjectMotion,ObjectMotion) > 0.0625f
+            || abs(MotionPrevious.z - PrevScreen.z) > max(DeviceZ * 0.001f, 1e-7f);
+        PrevScreen = MotionPrevious;
+#else
+        // Without depth velocity, moving geometry cannot be validated reliably.
+        // Keep camera-only surfaces; reset moving objects instead of dragging AO.
+        const float2 ObjectDelta = (NoJitter - (PrevScreen.xy - View.TemporalAAJitter.zw) - Velocity.xy) * Input_ViewportSize * 0.5f;
+        if (dot(ObjectDelta,ObjectDelta) > 0.0625f) { return false; }
+#endif
+    }
+    const float2 HistoryUV = PrevScreen.xy * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz;
+    if (!Inside(HistoryUV) || PrevScreen.z <= 0) { return false; }
+    const float4 Old = AOHistoryTexture.SampleLevel(GlobalPointClampedSampler, HistoryUV, 0);
+    const float4 OldG = AOHistoryGeometryTexture.SampleLevel(GlobalPointClampedSampler, HistoryUV, 0);
+    if (Old.a != G.a || OldG.a != G.a || dot(OldG.xyz,G.xyz) < 0.9f) { return false; }
+    // Store the actual depth-derived plane rather than re-linearizing last
+    // frame's DeviceZ through current view parameters (unstable with TSR jitter).
+    // Static surfaces are the same world point, even as the camera moves.
+    const float3 TranslationDelta = DFFastLocalSubtractDemote(PrimaryView.PrevPreViewTranslation, PrimaryView.PreViewTranslation);
+    const float3 Expected = MovingSurface ? PrevPosition(PrevScreen.xy, PrevScreen.z) : Position(UV) + TranslationDelta;
+    const float PlaneError = abs(dot(Expected, OldG.xyz) - Old.g);
+    const float Depth = ConvertFromDeviceZ(DeviceZ);
+    if (PlaneError > clamp(Depth * 0.0005f, 0.25f, 2.0f)) { return false; }
+    Mask = Old.r;
+    return true;
 }
 
 void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition : SV_POSITION,
@@ -107,6 +165,24 @@ void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition :
     OutColor = float4(Sum.rg / Weight, Sum.b / KernelWeight, G.a);
 #elif AO_FILTER_STAGE == 2
     OutColor = HardMask(UV).xxxx;
+#elif AO_FILTER_STAGE == 5
+    const float4 G = AOGeometryTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    const float4 M = AOMomentsTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    const float Z = SceneTexturesStruct.SceneDepthTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).r;
+    const float V = saturate(M.r + AOFilterConservatism * sqrt(max(M.g - M.r*M.r, 0)));
+    float Mask = AOMaskTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).r;
+    float OldMask;
+    const bool Accepted = PreviousMask(UV, Z, G, OldMask);
+    if (Accepted)
+    {
+        const float Enter = max(0, saturate(AOThreshold) - AOHysteresis);
+        const float Leave = min(1, saturate(AOThreshold) + AOHysteresis);
+        // A new dark feature must survive spatial cleanup and the lower threshold.
+        // An existing feature persists through the ambiguity band, never via RGB blending.
+        Mask = OldMask < 0.5f ? step(Leave, V) : max(Mask, step(Enter, V));
+    }
+    if (G.a == 0) { Mask = 1; }
+    OutColor = float4(Mask, (G.a != 0 ? dot(Position(UV), G.xyz) : 0), Accepted ? 1 : 0, G.a);
 #else
     const float4 G = AOGeometryTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
     if (G.a == 0) { OutColor = 1; return; }

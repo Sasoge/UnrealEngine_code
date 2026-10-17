@@ -972,6 +972,16 @@ struct FGTAOTAAHistory
 	}
 };
 
+// [DeferredToon] One hard AO state per volume. Owned by previous-view info,
+// so disabled/removed volumes and unused views cannot retain stale histories.
+struct FDeferredToonAOHistory
+{
+    TRefCountPtr<IPooledRenderTarget> State; // mask, depth-derived plane offset, accepted history, source
+    FIntRect ViewRect;
+    FVector4f FilterSettings = FVector4f(0,0,0,0);
+    float Threshold = 0;
+};
+
 // Structure that hold all information related to previous frame.
 struct FPreviousViewInfo
 {
@@ -1056,6 +1066,9 @@ struct FPreviousViewInfo
 	
 	// History for the ambient occlusion
 	FScreenSpaceDenoiserHistory AmbientOcclusionHistory;
+
+    TRefCountPtr<IPooledRenderTarget> DeferredToonAOGeometry;
+    TMap<FString, TSharedPtr<FDeferredToonAOHistory>> DeferredToonAOHistories;
 
 	// History for GTAO
 	FGTAOTAAHistory				 GTAOHistory;

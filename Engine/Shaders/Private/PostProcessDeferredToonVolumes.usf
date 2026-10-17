@@ -605,7 +605,8 @@ void MainPS(
         {
             const float4 M = AOMomentsTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
             Display = AOFilterDebug == 1u ? M.rrr : (AOFilterDebug == 2u ? M.bbb
-                : AOGeometryTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).rgb * 0.5f + 0.5f);
+                : (AOFilterDebug == 3u ? AOGeometryTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).rgb * 0.5f + 0.5f
+                    : AOMaskTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).bbb));
         }
         OutColor = float4(Display * PrimaryView.PreExposure, 1);
     }

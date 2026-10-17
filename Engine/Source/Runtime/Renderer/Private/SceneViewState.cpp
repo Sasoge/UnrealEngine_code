@@ -205,6 +205,12 @@ uint64 FPreviousViewInfo::GetGPUSizeBytes(bool bLogSizes) const
 		GetRenderTargetGPUSizeBytes(MobileAmbientOcclusion, bLogSizes) +
 		GetRenderTargetGPUSizeBytes(VisualizeMotionVectors, bLogSizes);
 
+    TotalSize += GetRenderTargetGPUSizeBytes(DeferredToonAOGeometry, bLogSizes);
+    for (const auto& Entry : DeferredToonAOHistories)
+    {
+        TotalSize += GetRenderTargetGPUSizeBytes(Entry.Value->State, bLogSizes);
+    }
+
 	for (auto ShadowHistoryIt = ShadowHistories.begin(); ShadowHistoryIt; ++ShadowHistoryIt)
 	{
 		if (ShadowHistoryIt.Value().IsValid())
