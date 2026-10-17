@@ -62,6 +62,7 @@ enum class EDeferredToonIndirectOcclusionMode : uint8
     Native = 0 UMETA(DisplayName="Native (No Adjustment)"),
     Unified = 1 UMETA(DisplayName="Unified (Automatic Source)"),
     Legacy = 2 UMETA(DisplayName="Legacy Separate Settings"),
+    HardTwoTone = 3 UMETA(DisplayName="AO Two-Tone (Automatic Source)"),
 };
 
 // [DeferredToon] Details-panel selector for the same semantic views exposed by
@@ -115,6 +116,7 @@ enum class EDeferredToonDebugView : uint8
     IndirectOcclusionCoverage = 35 UMETA(DisplayName="35 - Indirect Occlusion Availability"),
     IndirectOcclusionSource = 36 UMETA(DisplayName="36 - AO Source (Cyan=Lumen, Orange=Sky, Black=None)"),
     IndirectDiffuseBand = 37 UMETA(DisplayName="37 - Indirect Diffuse Two-Tone Mask"),
+    IndirectOcclusionBand = 38 UMETA(DisplayName="38 - AO Two-Tone Mask (White = Unoccluded)"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 
@@ -228,8 +230,13 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Occlusion", meta=(DisplayName="Occlusion Control", DisplayPriority="0", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Unified automatically uses Lumen short-range AO or dynamic SkyLight occlusion. Native disables all box AO adjustments. Legacy preserves older separate settings."))
     EDeferredToonIndirectOcclusionMode IndirectOcclusionMode = EDeferredToonIndirectOcclusionMode::Native;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Occlusion", meta=(DisplayName="Occlusion Strength", DisplayPriority="1", ClampMin="0.0", ClampMax="1.0", EditCondition="IndirectOcclusionMode == EDeferredToonIndirectOcclusionMode::Unified && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="1 preserves native diffuse occlusion; 0 restores diffuse before the selected independent occlusion. Traced GI shadows remain. Works without enabling indirect color grading; full color replacement can hide the difference."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Occlusion", meta=(DisplayName="Occlusion Strength", DisplayPriority="1", ClampMin="0.0", ClampMax="1.0", EditCondition="(IndirectOcclusionMode == EDeferredToonIndirectOcclusionMode::Unified || IndirectOcclusionMode == EDeferredToonIndirectOcclusionMode::HardTwoTone) && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Unified strength: 1 preserves native AO. AO Two-Tone: 1 fully darkens selected occluded regions. In both modes 0 removes only the selected AO. Traced GI shadows remain. Works without enabling indirect color grading; full color replacement can hide the difference."))
     float IndirectOcclusionStrength = 1.0f;
+
+    // [DeferredToon] Threshold native visibility, never indirect RGB luminance.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Occlusion", meta=(DisplayName="AO Two-Tone Threshold", DisplayPriority="2", ClampMin="0.0", ClampMax="1.0", EditCondition="IndirectOcclusionMode == EDeferredToonIndirectOcclusionMode::HardTwoTone && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Native AO visibility below this threshold selects occlusion; equality is unoccluded. Higher values grow the occluded region. Restores captured diffuse before AO, then applies a two-level scalar attenuation. Does not quantize GI brightness or color. Use view 38 to inspect the binary mask."))
+    float IndirectOcclusionThreshold = 0.8f;
+
 
     // [DeferredToon] Optional sky-only occlusion grading, separate from diffuse color.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Occlusion", AdvancedDisplay, meta=(DisplayName="Adjust Sky Occlusion Separately", EditCondition="IndirectOcclusionMode == EDeferredToonIndirectOcclusionMode::Legacy && bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="SkyLight only. Lumen and unsupported pixels keep their original diffuse result. Enable independent indirect diffuse first."))
@@ -325,6 +332,7 @@ public:
     // [DeferredToon] Runtime authoring invalidates the scene proxy.
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectOcclusionMode(EDeferredToonIndirectOcclusionMode NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectOcclusionStrength(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectOcclusionThreshold(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOverrideSkyOcclusion(bool NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetSkyOcclusionStrength(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetSkyOcclusionColor(FLinearColor NewValue);

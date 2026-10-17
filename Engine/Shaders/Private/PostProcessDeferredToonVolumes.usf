@@ -64,6 +64,8 @@ Texture2D LumenDiffuseBeforeShortAOTexture;
 uint bLumenShortAOAvailable;
 uint bOverrideLumenShortRangeAO;
 float LumenShortRangeAOStrength;
+uint bHardIndirectOcclusion;
+float IndirectOcclusionThreshold;
 uint bUnifiedIndirectOcclusion; // [DeferredToon]
 float ShadowTextureWeight;
 float2 ShadowTextureTiling;
@@ -172,6 +174,12 @@ FDeferredToonOcclusion ResolveDeferredToonOcclusion(float4 Sky, float4 Lumen, bo
     return Result;
 }
 
+// [DeferredToon] Visibility is dimensionless; do not classify material/GI brightness.
+float DeferredToonAOBand(FDeferredToonOcclusion Occlusion)
+{
+    return Occlusion.Source != 0u ? step(saturate(IndirectOcclusionThreshold), Occlusion.Visibility) : 1.0f;
+}
+
 // [DeferredToon] Scene-linear indirect after the same AO controls used by composition.
 float3 ResolveDeferredToonAdjustedIndirect(float3 IndirectRGB, float3 ExtractedIndirect, FDeferredToonOcclusion Occlusion)
 {
@@ -191,6 +199,14 @@ float3 ResolveDeferredToonAdjustedIndirect(float3 IndirectRGB, float3 ExtractedI
         // pre/post-AO diffuse, preserving colored multibounce and zero visibility.
         const float3 BeforeAO = Occlusion.BeforeAO;
         const float Strength = bAdjustLumenAO ? LumenShortRangeAOStrength : SkyOcclusionStrength;
+        if (bHardIndirectOcclusion != 0u)
+        {
+            // [DeferredToon] Replace the selected AO, not the entire GI layer. Restore
+            // before-AO RGB, then apply only a two-level attenuation. Never multiply
+            // this over native post-AO RGB or divide by near-zero visibility.
+            const float Visibility = lerp(1.0f, DeferredToonAOBand(Occlusion), saturate(Strength));
+            return max(BeforeAO, 0.0f) * BudgetScale * Visibility * PrimaryView.OneOverPreExposure;
+        }
         NativeIndirect += (max(BeforeAO, 0.0f) - RawIndirect) * BudgetScale
             * (1.0f - saturate(Strength)) * PrimaryView.OneOverPreExposure;
         NativeIndirect = max(NativeIndirect, 0.0f);
@@ -571,6 +587,10 @@ void MainPS(
         OutColor = float4((bValidIndirect ? 1.0f : 0.0f).xxx, 1.0f);
     }
     // [DeferredToon] Separate raw lighting, visibility and availability diagnostics.
+    else if (DebugView == 38)
+    {
+        OutColor = float4(DeferredToonAOBand(Occlusion).xxx * PrimaryView.PreExposure, 1);
+    }
     else if (DebugView == 37)
     {
         const float3 Original = OriginalSceneColorTexture.SampleLevel(SceneColorSampler, UV, 0).rgb;

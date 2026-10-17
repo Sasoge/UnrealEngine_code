@@ -267,6 +267,7 @@ void UDeferredToonVolumeComponent::SetIndirectDiffuseColorReplaceWeight(float Ne
 // [DeferredToon] Unified entry point; old setters below explicitly select compatibility mode.
 void UDeferredToonVolumeComponent::SetIndirectOcclusionMode(EDeferredToonIndirectOcclusionMode NewValue) { DTOON_SET(IndirectOcclusionMode, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetIndirectOcclusionStrength(float NewValue) { DTOON_SET(IndirectOcclusionStrength, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetIndirectOcclusionThreshold(float NewValue) { DTOON_SET(IndirectOcclusionThreshold, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 // [DeferredToon] Sky occlusion controls.
 void UDeferredToonVolumeComponent::SetOverrideSkyOcclusion(bool NewValue) { SetIndirectOcclusionMode(EDeferredToonIndirectOcclusionMode::Legacy); DTOON_SET(bOverrideSkyOcclusion, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetSkyOcclusionStrength(float NewValue) { SetIndirectOcclusionMode(EDeferredToonIndirectOcclusionMode::Legacy); DTOON_SET(SkyOcclusionStrength, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }

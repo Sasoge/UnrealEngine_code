@@ -49,7 +49,9 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     bOverrideLumenShortRangeAO = Component->bOverrideLumenShortRangeAO; // [DeferredToon]
     LumenShortRangeAOStrength = FMath::Clamp(Component->LumenShortRangeAOStrength, 0.0f, 1.0f);
     // [DeferredToon] Resolve the single control into provider settings, once per proxy update.
-    bUnifiedIndirectOcclusion = Component->IndirectOcclusionMode == EDeferredToonIndirectOcclusionMode::Unified;
+    bHardIndirectOcclusion = Component->IndirectOcclusionMode == EDeferredToonIndirectOcclusionMode::HardTwoTone;
+    IndirectOcclusionThreshold = FMath::Clamp(Component->IndirectOcclusionThreshold, 0.0f, 1.0f);
+    bUnifiedIndirectOcclusion = bHardIndirectOcclusion || Component->IndirectOcclusionMode == EDeferredToonIndirectOcclusionMode::Unified;
     if (bUnifiedIndirectOcclusion)
     {
         bOverrideSkyOcclusion = bOverrideLumenShortRangeAO = true;
