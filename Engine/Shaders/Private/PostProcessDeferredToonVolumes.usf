@@ -187,8 +187,9 @@ float DeferredToonAOBand(FDeferredToonOcclusion Occlusion)
     return Occlusion.Source != 0u ? Occlusion.HardVisibility : 1.0f;
 }
 
-// [DeferredToon] Scene-linear indirect after the same AO controls used by composition.
-float3 ResolveDeferredToonAdjustedIndirect(float3 IndirectRGB, float3 ExtractedIndirect, FDeferredToonOcclusion Occlusion)
+// [DeferredToon] Scene-linear input to grading. Hard AO restores before-AO RGB here;
+// its scalar attenuation is applied AFTER grading, so authored colors cannot erase it.
+float3 ResolveDeferredToonIndirectForGrading(float3 IndirectRGB, float3 ExtractedIndirect, FDeferredToonOcclusion Occlusion)
 {
     float3 NativeIndirect = ExtractedIndirect * PrimaryView.OneOverPreExposure;
     // [DeferredToon] Interpolate actual pre/post-AO lighting, never divide by visibility.
@@ -208,17 +209,32 @@ float3 ResolveDeferredToonAdjustedIndirect(float3 IndirectRGB, float3 ExtractedI
         const float Strength = bAdjustLumenAO ? LumenShortRangeAOStrength : SkyOcclusionStrength;
         if (bHardIndirectOcclusion != 0u)
         {
-            // [DeferredToon] Replace the selected AO, not the entire GI layer. Restore
-            // before-AO RGB, then apply only a two-level attenuation. Never multiply
-            // this over native post-AO RGB or divide by near-zero visibility.
-            const float Visibility = lerp(1.0f, DeferredToonAOBand(Occlusion), saturate(Strength));
-            return max(BeforeAO, 0.0f) * BudgetScale * Visibility * PrimaryView.OneOverPreExposure;
+            // [DeferredToon] Remove the selected native AO exactly once, retaining
+            // GI shading and the residual budget. Do not threshold AO-modulated RGB.
+            return max(BeforeAO, 0.0f) * BudgetScale * PrimaryView.OneOverPreExposure;
         }
         NativeIndirect += (max(BeforeAO, 0.0f) - RawIndirect) * BudgetScale
             * (1.0f - saturate(Strength)) * PrimaryView.OneOverPreExposure;
         NativeIndirect = max(NativeIndirect, 0.0f);
     }
     return NativeIndirect;
+}
+
+// [DeferredToon] Final indirect-only attenuation. Missing/disabled providers are neutral.
+float ResolveDeferredToonFinalAO(FDeferredToonOcclusion Occlusion)
+{
+    if (bHardIndirectOcclusion == 0u)
+    {
+        return 1.0f;
+    }
+    const bool bLumen = bOverrideLumenShortRangeAO != 0u && Occlusion.Source == 1u;
+    const bool bSky = bOverrideSkyOcclusion != 0u && Occlusion.Source == 2u;
+    if (!bLumen && !bSky)
+    {
+        return 1.0f;
+    }
+    const float Strength = bLumen ? LumenShortRangeAOStrength : SkyOcclusionStrength;
+    return lerp(1.0f, DeferredToonAOBand(Occlusion), saturate(Strength));
 }
 
 float DeferredToonIndirectBand(float3 Indirect)
@@ -624,7 +640,7 @@ void MainPS(
         const float3 DebugResidual = max(Original - EffectiveLight.rgb * PrimaryView.PreExposure, 0.0f);
         const float3 Extracted = min(max(IndirectSample.rgb, 0.0f), DebugResidual);
         const float Band = bValidIndirect ? DeferredToonIndirectBand(
-            ResolveDeferredToonAdjustedIndirect(IndirectSample.rgb, Extracted, Occlusion)) : 0.0f;
+            ResolveDeferredToonIndirectForGrading(IndirectSample.rgb, Extracted, Occlusion)) : 0.0f;
         OutColor = float4(Band.xxx * PrimaryView.PreExposure, 1);
     }
     else if (DebugView == 33) // [DeferredToon] Unified raw provider diagnostics.
@@ -722,7 +738,7 @@ void MainPS(
                 // and other later passes may prevent an exact local decomposition.
                 // Neutral settings + Other=1 reproduce the old composite exactly.
                 const float3 ExtractedIndirect = min(max(IndirectSample.rgb, 0.0f), Residual);
-                const float3 NativeIndirect = ResolveDeferredToonAdjustedIndirect(IndirectSample.rgb, ExtractedIndirect, Occlusion);
+                const float3 NativeIndirect = ResolveDeferredToonIndirectForGrading(IndirectSample.rgb, ExtractedIndirect, Occlusion);
                 const bool bAdjustSkyAO = bOverrideSkyOcclusion != 0u && Occlusion.Source == 2u;
                 const float3 Tint = max(IndirectDiffuseColor.rgb, 0.0f);
                 float3 GradedIndirect = lerp(NativeIndirect * Tint, Tint * AuthoredBase,
@@ -748,6 +764,9 @@ void MainPS(
                 {
                     GradedIndirect = NativeIndirect * PrimaryView.PreExposure * saturate(OtherLightingWeight);
                 }
+                // [DeferredToon] Apply after color replacement, whole-GI bands and
+                // standalone weighting. Never attenuate direct light or specular.
+                GradedIndirect *= ResolveDeferredToonFinalAO(Occlusion);
                 OtherContribution = GradedIndirect + (Residual - ExtractedIndirect) * saturate(OtherLightingWeight);
             }
             OutputColor = lerp(SceneColor.rgb, GradedDirect + OtherContribution, Weight);
