@@ -606,7 +606,15 @@ void MainPS(
             const float4 M = AOMomentsTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
             Display = AOFilterDebug == 1u ? M.rrr : (AOFilterDebug == 2u ? M.bbb
                 : (AOFilterDebug == 3u ? AOGeometryTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).rgb * 0.5f + 0.5f
-                    : AOMaskTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).bbb));
+                    : (AOMaskTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).b == 1 ? 1 : 0).xxx));
+            if (AOFilterDebug == 5u)
+            {
+                const float Reason = AOMaskTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).b;
+                Display = Reason == 1 ? float3(1,1,1) : Reason == 2 ? float3(0.25f,0.25f,0.25f)
+                    : Reason == 3 ? float3(0,1,1) : Reason == 4 ? float3(1,1,0)
+                    : Reason == 5 ? float3(1,0,1) : Reason == 6 ? float3(1,0,0)
+                    : Reason == 7 ? float3(0,0,1) : Reason == 8 ? float3(1,0.5f,0) : float3(0,0,0);
+            }
         }
         OutColor = float4(Display * PrimaryView.PreExposure, 1);
     }

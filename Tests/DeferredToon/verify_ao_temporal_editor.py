@@ -127,7 +127,7 @@ def tick(delta):
                           if a.get_actor_label() == 'DeferredToonTemporalTestCamera')
             pc.set_view_target_with_blend(camera, 0)
             for s in ['r.AntiAliasingMethod 0', 'r.ScreenPercentage 100', 'Toon.Test.ViewportSize 960 720',
-                      'ShowFlag.Tonemapper 0', 'ShowFlag.Bloom 0', 'r.EyeAdaptation.PreExposureOverride 1',
+                      'ShowFlag.Tonemapper 0', 'ShowFlag.Bloom 0', 'ShowFlag.MotionBlur 0', 'r.EyeAdaptation.PreExposureOverride 1',
                       'r.Toon.DeferredVolumes.DebugView 38', 'r.Toon.DeferredVolumes.AOFilterDebug 0',
                       't.IdleWhenNotForeground 0', 'r.Toon.DeferredVolumes.AOFilterRadius 8']:
                 cmd(s)

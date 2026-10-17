@@ -3,7 +3,7 @@
 #include "PostProcessCommon.ush"
 #include "ScreenPass.ush"
 
-// [DeferredToon] Geometry-aware AO filtering and reprojected binary state. Never consume shaded RGB or material normals.
+// [DeferredToon] Geometry-aware AO filtering, continuous history and reprojected binary state. Never consume shaded RGB or material normals.
 SCREEN_PASS_TEXTURE_VIEWPORT(Input)
 Texture2D IndirectDiffuseTexture;
 Texture2D SkyDiffuseBeforeAOTexture;
@@ -19,6 +19,8 @@ float AOThreshold;
 int2 AOFilterDirection;
 Texture2D AOHistoryTexture;
 Texture2D AOHistoryGeometryTexture;
+Texture2D AOHistoryVisibilityTexture;
+float AOTemporalWeight;
 uint bAOHistoryValid;
 float AOHysteresis;
 
@@ -74,14 +76,20 @@ float3 PrevPosition(float2 Screen, float DeviceZ)
     return mul(float4(GetScreenPositionForProjectionType(Screen, Depth), Depth, 1), View.PrevScreenToTranslatedWorld).xyz;
 }
 
-bool PreviousMask(float2 UV, float DeviceZ, float4 G, out float Mask)
+// Reason: 1 accepted, 2 reset/no source, 3 outside, 4 source, 5 normal,
+// 6 plane distance, 7 unsupported motion, 8 insufficient coverage. Never interpolate an unvalidated surface.
+bool PreviousMask(float2 UV, float DeviceZ, float4 G, out float Mask, out float2 VisibilityAge, out float Confidence, out float Reason)
 {
     Mask = 0;
+    VisibilityAge = float2(1, 1);
+    Confidence = 0;
+    Reason = 2;
     if (bAOHistoryValid == 0 || G.a == 0 || DeviceZ <= 0) { return false; }
     const float2 Screen = (UV - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy;
     // Use the jitter-aware matrix for camera motion; UE velocity excludes jitter.
     const float2 NoJitter = Screen - View.TemporalAAJitter.xy;
     const float4 PrevClip = mul(float4(Screen, DeviceZ, 1), View.ClipToPrevClipWithAA);
+    Reason = 3;
     if (PrevClip.w <= 0) { return false; }
     float3 PrevScreen = PrevClip.xyz / PrevClip.w;
     bool MovingSurface = false;
@@ -100,29 +108,49 @@ bool PreviousMask(float2 UV, float DeviceZ, float4 G, out float Mask)
         // Without depth velocity, moving geometry cannot be validated reliably.
         // Keep camera-only surfaces; reset moving objects instead of dragging AO.
         const float2 ObjectDelta = (NoJitter - (PrevScreen.xy - View.TemporalAAJitter.zw) - Velocity.xy) * Input_ViewportSize * 0.5f;
-        if (dot(ObjectDelta,ObjectDelta) > 0.0625f) { return false; }
+        if (dot(ObjectDelta,ObjectDelta) > 0.0625f) { Reason = 7; return false; }
 #endif
     }
     const float2 HistoryUV = PrevScreen.xy * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz;
     if (!Inside(HistoryUV) || PrevScreen.z <= 0) { return false; }
-    const float4 Old = AOHistoryTexture.SampleLevel(GlobalPointClampedSampler, HistoryUV, 0);
-    const float4 OldG = AOHistoryGeometryTexture.SampleLevel(GlobalPointClampedSampler, HistoryUV, 0);
-    if (Old.a != G.a || OldG.a != G.a || dot(OldG.xyz,G.xyz) < 0.9f) { return false; }
-    // Store the actual depth-derived plane rather than re-linearizing last
-    // frame's DeviceZ through current view parameters (unstable with TSR jitter).
-    // Static surfaces are the same world point, even as the camera moves.
     const float3 TranslationDelta = DFFastLocalSubtractDemote(PrimaryView.PrevPreViewTranslation, PrimaryView.PreViewTranslation);
     const float3 Expected = MovingSurface ? PrevPosition(PrevScreen.xy, PrevScreen.z) : Position(UV) + TranslationDelta;
-    const float PlaneError = abs(dot(Expected, OldG.xyz) - Old.g);
-    const float Depth = ConvertFromDeviceZ(DeviceZ);
-    if (PlaneError > clamp(Depth * 0.0005f, 0.25f, 2.0f)) { return false; }
-    Mask = Old.r;
+    const float Tolerance = clamp(ConvertFromDeviceZ(DeviceZ) * 0.0005f, 0.25f, 2.0f);
+    const float2 Pixel = HistoryUV * Input_Extent - 0.5f;
+    const float2 Base = floor(Pixel), Fraction = frac(Pixel);
+    float2 Sum = 0;
+    float BestWeight = -1;
+    Reason = 4;
+    [unroll] for (int Y = 0; Y < 2; ++Y)
+    {
+        [unroll] for (int X = 0; X < 2; ++X)
+        {
+            const float2 TapUV = (Base + float2(X,Y) + 0.5f) * Input_ExtentInverse;
+            const float Weight = (X == 0 ? 1-Fraction.x : Fraction.x) * (Y == 0 ? 1-Fraction.y : Fraction.y);
+            if (Weight <= 1e-5f || !Inside(TapUV)) { continue; }
+            const float4 Old = AOHistoryTexture.SampleLevel(GlobalPointClampedSampler, TapUV, 0);
+            const float4 OldG = AOHistoryGeometryTexture.SampleLevel(GlobalPointClampedSampler, TapUV, 0);
+            if (Old.a != G.a || OldG.a != G.a) { continue; }
+            Reason = max(Reason, 5);
+            if (dot(OldG.xyz,G.xyz) < 0.9f) { continue; }
+            Reason = max(Reason, 6);
+            if (abs(dot(Expected, OldG.xyz) - Old.g) > Tolerance) { continue; }
+            Sum += Weight * AOHistoryVisibilityTexture.SampleLevel(GlobalPointClampedSampler, TapUV, 0).rg;
+            Confidence += Weight;
+            // Keep a discrete previous state from the strongest valid tap.
+            if (Weight > BestWeight) { Mask = Old.r; BestWeight = Weight; }
+        }
+    }
+    // A tiny valid corner cannot support a persistent history on its own.
+    if (Confidence < 0.1f) { if (BestWeight >= 0) { Reason = 8; } return false; }
+    VisibilityAge = Sum / Confidence;
+    Reason = 1;
     return true;
 }
 
 void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition : SV_POSITION,
     out float4 OutColor : SV_Target0
-#if AO_FILTER_STAGE == 0
+#if AO_FILTER_STAGE == 0 || AO_FILTER_STAGE == 6
     , out float4 OutMoments : SV_Target1
 #endif
 )
@@ -163,6 +191,41 @@ void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition :
         Weight += W;
     }
     OutColor = float4(Sum.rg / Weight, Sum.b / KernelWeight, G.a);
+#elif AO_FILTER_STAGE == 6
+    const float4 G = AOGeometryTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    const float4 M = AOMomentsTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    const float Z = SceneTexturesStruct.SceneDepthTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).r;
+    const float Current = saturate(M.r + AOFilterConservatism * sqrt(max(M.g - M.r*M.r, 0)));
+    float Stable = Current, Age = 1;
+    float OldMask, Confidence, Reason;
+    float2 History;
+    if (PreviousMask(UV, Z, G, OldMask, History, Confidence, Reason))
+    {
+        // Clip continuous history to the current same-surface neighborhood.
+        // Occluders can move while the receiving wall stays still.
+        float Lo = Current, Hi = Current;
+        const float3 P = Position(UV);
+        [unroll] for (int Y = -1; Y <= 1; ++Y)
+        {
+            [unroll] for (int X = -1; X <= 1; ++X)
+            {
+                const float2 TapUV = UV + float2(X,Y) * Input_ExtentInverse;
+                if (SurfaceWeight(TapUV, P, G) <= 0) { continue; }
+                const float4 Other = AOMomentsTexture.SampleLevel(GlobalPointClampedSampler, TapUV, 0);
+                const float V = saturate(Other.r + AOFilterConservatism * sqrt(max(Other.g - Other.r*Other.r, 0)));
+                Lo = min(Lo, V); Hi = max(Hi, V);
+            }
+        }
+        // Small slack damps sampling noise, while large changes respond immediately.
+        const float Clipped = clamp(History.x, max(0, Lo-0.02f), min(1, Hi+0.02f));
+        const float Weight = min(AOTemporalWeight, History.y / (History.y+1)) * saturate(Confidence);
+        Stable = lerp(Current, Clipped, Weight);
+        Age = min(History.y+1, 16);
+    }
+    if (G.a == 0) { Stable = 1; Age = 1; }
+    // Variance conservatism was applied before temporal filtering, exactly once.
+    OutColor = float4(Stable, Stable*Stable, M.b, G.a);
+    OutMoments = float4(Stable, Age, 0, 0);
 #elif AO_FILTER_STAGE == 2
     OutColor = HardMask(UV).xxxx;
 #elif AO_FILTER_STAGE == 5
@@ -171,8 +234,9 @@ void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition :
     const float Z = SceneTexturesStruct.SceneDepthTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).r;
     const float V = saturate(M.r + AOFilterConservatism * sqrt(max(M.g - M.r*M.r, 0)));
     float Mask = AOMaskTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).r;
-    float OldMask;
-    const bool Accepted = PreviousMask(UV, Z, G, OldMask);
+    float OldMask, Confidence, Reason;
+    float2 VisibilityAge;
+    const bool Accepted = PreviousMask(UV, Z, G, OldMask, VisibilityAge, Confidence, Reason);
     if (Accepted)
     {
         const float Enter = max(0, saturate(AOThreshold) - AOHysteresis);
@@ -182,7 +246,7 @@ void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition :
         Mask = OldMask < 0.5f ? step(Leave, V) : max(Mask, step(Enter, V));
     }
     if (G.a == 0) { Mask = 1; }
-    OutColor = float4(Mask, (G.a != 0 ? dot(Position(UV), G.xyz) : 0), Accepted ? 1 : 0, G.a);
+    OutColor = float4(Mask, (G.a != 0 ? dot(Position(UV), G.xyz) : 0), Reason, G.a);
 #else
     const float4 G = AOGeometryTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
     if (G.a == 0) { OutColor = 1; return; }

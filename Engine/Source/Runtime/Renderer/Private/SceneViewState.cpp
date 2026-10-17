@@ -209,6 +209,7 @@ uint64 FPreviousViewInfo::GetGPUSizeBytes(bool bLogSizes) const
     for (const auto& Entry : DeferredToonAOHistories)
     {
         TotalSize += GetRenderTargetGPUSizeBytes(Entry.Value->State, bLogSizes);
+        TotalSize += GetRenderTargetGPUSizeBytes(Entry.Value->Visibility, bLogSizes);
     }
 
 	for (auto ShadowHistoryIt = ShadowHistories.begin(); ShadowHistoryIt; ++ShadowHistoryIt)

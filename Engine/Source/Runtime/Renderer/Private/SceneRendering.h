@@ -976,7 +976,9 @@ struct FGTAOTAAHistory
 // so disabled/removed volumes and unused views cannot retain stale histories.
 struct FDeferredToonAOHistory
 {
-    TRefCountPtr<IPooledRenderTarget> State; // mask, depth-derived plane offset, accepted history, source
+    TRefCountPtr<IPooledRenderTarget> State; // mask, depth-derived plane offset, history reason, source
+    TRefCountPtr<IPooledRenderTarget> Visibility; // continuous visibility and age
+    float TemporalWeight = 0;
     FIntRect ViewRect;
     FVector4f FilterSettings = FVector4f(0,0,0,0);
     float Threshold = 0;

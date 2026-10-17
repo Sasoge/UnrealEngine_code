@@ -44,18 +44,22 @@ namespace
         TEXT("Remove tiny dark AO features with geometry-aware hard-mask opening. 0 disables; 1 enables (default)."), ECVF_RenderThreadSafe);
     TAutoConsoleVariable<int32> CVarDeferredToonAOFilterDebug(
         TEXT("r.Toon.DeferredVolumes.AOFilterDebug"), 0,
-        TEXT("Override view 38 only: 0 hard AO, 1 filtered continuous visibility, 2 filter support, 3 depth-derived normals, 4 accepted temporal history."), ECVF_RenderThreadSafe);
+        TEXT("Override view 38 only: 0 hard AO, 1 filtered continuous visibility, 2 filter support, 3 depth-derived normals, 4 accepted temporal history, 5 history rejection reason (white=accepted, gray=reset, cyan=outside, yellow=source, magenta=normal, red=plane, blue=motion, orange=insufficient coverage)."), ECVF_RenderThreadSafe);
 
     TAutoConsoleVariable<float> CVarDeferredToonAOHysteresis(
         TEXT("r.Toon.DeferredVolumes.AOHysteresis"), 0.04f,
         TEXT("Hard AO temporal hysteresis half-width (0-0.2, default 0.04). Zero disables history. Reprojects surface state; does not blend RGB or binary masks."), ECVF_RenderThreadSafe);
+
+    TAutoConsoleVariable<float> CVarDeferredToonAOTemporalWeight(
+        TEXT("r.Toon.DeferredVolumes.AOTemporalWeight"), 0.85f,
+        TEXT("Continuous AO history weight before binary threshold (0-0.95, default 0.85). Zero disables scalar accumulation, keeping reprojection and hysteresis."), ECVF_RenderThreadSafe);
 
     class FDeferredToonAOFilterPS : public FGlobalShader
     {
     public:
         DECLARE_GLOBAL_SHADER(FDeferredToonAOFilterPS);
         SHADER_USE_PARAMETER_STRUCT(FDeferredToonAOFilterPS, FGlobalShader);
-        class FStage : SHADER_PERMUTATION_INT("AO_FILTER_STAGE", 6);
+        class FStage : SHADER_PERMUTATION_INT("AO_FILTER_STAGE", 7);
         using FPermutationDomain = TShaderPermutationDomain<FStage>;
         static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
         {
@@ -80,6 +84,8 @@ namespace
             SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOHistoryGeometryTexture)
             SHADER_PARAMETER(uint32, bAOHistoryValid)
             SHADER_PARAMETER(float, AOHysteresis)
+            SHADER_PARAMETER(float, AOTemporalWeight)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOHistoryVisibilityTexture)
             SHADER_PARAMETER(FIntPoint, AOFilterDirection)
             RENDER_TARGET_BINDING_SLOTS()
         END_SHADER_PARAMETER_STRUCT()
@@ -114,6 +120,8 @@ namespace
         P->AOMomentsTexture = AO.Moments ? AO.Moments : Black;
         P->AOMaskTexture = Mask ? Mask : Black;
         P->bAOHistoryValid = History != nullptr;
+        P->AOTemporalWeight = FMath::Clamp(CVarDeferredToonAOTemporalWeight.GetValueOnRenderThread(), 0.0f, 0.95f);
+        P->AOHistoryVisibilityTexture = History ? GraphBuilder.RegisterExternalTexture(History->Visibility) : Black;
         P->AOHistoryTexture = History ? GraphBuilder.RegisterExternalTexture(History->State) : Black;
         P->AOHistoryGeometryTexture = History ? GraphBuilder.RegisterExternalTexture(View.PrevViewInfo.DeferredToonAOGeometry) : Black;
         P->AOHysteresis = FMath::Clamp(CVarDeferredToonAOHysteresis.GetValueOnRenderThread(), 0.0f, 0.2f);
@@ -122,7 +130,7 @@ namespace
         P->AOFilterConservatism = FMath::Clamp(CVarDeferredToonAOFilterConservatism.GetValueOnRenderThread(), 0.0f, 2.0f);
         P->AOThreshold = Threshold;
         const FRDGTextureRef Output = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(
-            Input.Texture->Desc.Extent, Stage == 0 ? PF_FloatRGBA : ((Stage == 1 || Stage == 5) ? PF_A32B32G32R32F : PF_R16F), FClearValueBinding::None,
+            Input.Texture->Desc.Extent, Stage == 0 ? PF_FloatRGBA : ((Stage == 1 || Stage == 5 || Stage == 6) ? PF_A32B32G32R32F : PF_R16F), FClearValueBinding::None,
             TexCreate_ShaderResource | TexCreate_RenderTargetable), TEXT("DeferredToon.AOSpatial"));
         P->RenderTargets[0] = FRenderTargetBinding(Output, ERenderTargetLoadAction::ENoAction);
         if (SecondTarget) { P->RenderTargets[1] = FRenderTargetBinding(SecondTarget, ERenderTargetLoadAction::ENoAction); }
@@ -155,24 +163,46 @@ namespace
         return AO;
     }
 
-    static FRDGTextureRef AddAOTemporal(FRDGBuilder& GraphBuilder, const FViewInfo& View,
+    // Continuous history must be resolved BEFORE thresholding and morphology.
+    static FRDGTextureRef AddAOHardMask(FRDGBuilder& GraphBuilder, const FViewInfo& View,
         const FScreenPassTexture& Input, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures,
-        const FDeferredToonVolumeSceneProxy& Volume, const FDeferredToonAOTextures& AO, FRDGTextureRef Mask)
+        const FDeferredToonVolumeSceneProxy& Volume, FDeferredToonAOTextures& AO)
     {
         const float Hysteresis = FMath::Clamp(CVarDeferredToonAOHysteresis.GetValueOnRenderThread(), 0.0f, 0.2f);
-        if (!View.ViewState || Hysteresis <= 0) { return Mask; }
+        const float TemporalWeight = FMath::Clamp(CVarDeferredToonAOTemporalWeight.GetValueOnRenderThread(), 0.0f, 0.95f);
+        const bool bTemporal = View.ViewState && Hysteresis > 0;
         const FVector4f Settings(CVarDeferredToonAOFilterRadius.GetValueOnRenderThread(),
             CVarDeferredToonAOFilterConservatism.GetValueOnRenderThread(), Hysteresis,
             float(CVarDeferredToonAOCleanup.GetValueOnRenderThread() != 0));
         const auto* Previous = View.PrevViewInfo.DeferredToonAOHistories.Find(Volume.GetStableSortPath());
         const FDeferredToonAOHistory* History = Previous ? Previous->Get() : nullptr;
-        if (View.bCameraCut || View.bPrevTransformsReset || !History || !History->State
+        if (!bTemporal || View.bCameraCut || View.bPrevTransformsReset || !History || !History->State || !History->Visibility
             || !View.PrevViewInfo.DeferredToonAOGeometry || History->ViewRect != Input.ViewRect
             || History->State->GetDesc().Extent != Input.Texture->Desc.Extent
-            || History->FilterSettings != Settings || History->Threshold != Volume.IndirectOcclusionThreshold)
+            || History->Visibility->GetDesc().Extent != Input.Texture->Desc.Extent
+            || History->FilterSettings != Settings || History->Threshold != Volume.IndirectOcclusionThreshold
+            || History->TemporalWeight != TemporalWeight)
         {
             History = nullptr;
         }
+        FRDGTextureRef Visibility = nullptr;
+        if (bTemporal)
+        {
+            Visibility = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(
+                Input.Texture->Desc.Extent, PF_G16R16F, FClearValueBinding::None,
+                TexCreate_ShaderResource | TexCreate_RenderTargetable), TEXT("DeferredToon.AOVisibilityHistory"));
+            AO.Moments = AddAOStage(GraphBuilder, View, Input, SceneTextures, 6, AO, nullptr,
+                FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold, Visibility, History);
+        }
+        FRDGTextureRef Mask = AddAOStage(GraphBuilder, View, Input, SceneTextures, 2, AO, nullptr,
+            FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold);
+        if (CVarDeferredToonAOCleanup.GetValueOnRenderThread() != 0)
+        {
+            Mask = AddAOStage(GraphBuilder, View, Input, SceneTextures, 3, AO, Mask);
+            Mask = AddAOStage(GraphBuilder, View, Input, SceneTextures, 4, AO, Mask,
+                FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold);
+        }
+        if (!bTemporal) { return Mask; }
         const FRDGTextureRef State = AddAOStage(GraphBuilder, View, Input, SceneTextures, 5, AO, Mask,
             FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold, nullptr, History);
         if (!View.bStatePrevViewInfoIsReadOnly)
@@ -181,9 +211,10 @@ namespace
             Next->ViewRect = Input.ViewRect;
             Next->FilterSettings = Settings;
             Next->Threshold = Volume.IndirectOcclusionThreshold;
-            // Shared pointer keeps extraction destinations stable when the map grows.
+            Next->TemporalWeight = TemporalWeight;
             View.ViewState->PrevFrameViewInfo.DeferredToonAOHistories.Add(Volume.GetStableSortPath(), Next);
             GraphBuilder.QueueTextureExtraction(State, &Next->State);
+            GraphBuilder.QueueTextureExtraction(Visibility, &Next->Visibility);
         }
         return State;
     }
@@ -436,21 +467,16 @@ namespace
         PassParameters->bHardIndirectOcclusion = Volume.bHardIndirectOcclusion ? 1u : 0u;
         PassParameters->IndirectOcclusionThreshold = Volume.IndirectOcclusionThreshold;
         FRDGTextureRef HardMask = nullptr;
+        FDeferredToonAOTextures VolumeAO = SharedAO;
         if (SharedAO.Moments && NeedsHardAO(Volume, DebugView))
         {
-            HardMask = AddAOStage(GraphBuilder, View, Input, SceneTextures, 2, SharedAO, nullptr, FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold);
-            if (CVarDeferredToonAOCleanup.GetValueOnRenderThread() != 0)
-            {
-                HardMask = AddAOStage(GraphBuilder, View, Input, SceneTextures, 3, SharedAO, HardMask);
-                HardMask = AddAOStage(GraphBuilder, View, Input, SceneTextures, 4, SharedAO, HardMask, FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold);
-            }
-            HardMask = AddAOTemporal(GraphBuilder, View, Input, SceneTextures, Volume, SharedAO, HardMask);
+            HardMask = AddAOHardMask(GraphBuilder, View, Input, SceneTextures, Volume, VolumeAO);
         }
         PassParameters->bFilteredAOAvailable = HardMask ? 1u : 0u;
         PassParameters->AOMaskTexture = HardMask ? HardMask : GSystemTextures.GetBlackDummy(GraphBuilder);
-        PassParameters->AOMomentsTexture = SharedAO.Moments ? SharedAO.Moments : GSystemTextures.GetBlackDummy(GraphBuilder);
+        PassParameters->AOMomentsTexture = VolumeAO.Moments ? VolumeAO.Moments : GSystemTextures.GetBlackDummy(GraphBuilder);
         PassParameters->AOGeometryTexture = SharedAO.Geometry ? SharedAO.Geometry : GSystemTextures.GetBlackDummy(GraphBuilder);
-        PassParameters->AOFilterDebug = FMath::Clamp(CVarDeferredToonAOFilterDebug.GetValueOnRenderThread(), 0, 4);
+        PassParameters->AOFilterDebug = FMath::Clamp(CVarDeferredToonAOFilterDebug.GetValueOnRenderThread(), 0, 5);
         PassParameters->bUnifiedIndirectOcclusion = Volume.bUnifiedIndirectOcclusion ? 1u : 0u; // [DeferredToon]
 		PassParameters->ShadowTextureWeight = Volume.ShadowTextureWeight;
 		PassParameters->ShadowTextureTiling = FVector2f(Volume.ShadowTextureTiling);
