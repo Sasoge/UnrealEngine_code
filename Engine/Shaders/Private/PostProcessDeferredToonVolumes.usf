@@ -67,6 +67,7 @@ float LumenShortRangeAOStrength;
 uint bHardIndirectOcclusion;
 float IndirectOcclusionThreshold;
 float AOFilterRadius;
+float AOFilterConservatism;
 uint bUnifiedIndirectOcclusion; // [DeferredToon]
 float ShadowTextureWeight;
 float2 ShadowTextureTiling;
@@ -185,19 +186,22 @@ float FilterDeferredToonAO(float2 UV, FDeferredToonOcclusion Center, float3 Cent
     {
         return Center.Visibility;
     }
-    const float Gaussian[5] = { 1, 4, 6, 4, 1 };
-    float Sum = Center.Visibility * 36.0f;
-    float WeightSum = 36.0f;
+    // Wider support suppresses fluctuations left by the small 5x5 kernel.
+    // Approximate Gaussian, sigma 4 input pixels at the default radius of 8.
+    const float Gaussian[9] = { 0.135335f, 0.324652f, 0.606531f, 0.882497f, 1.0f, 0.882497f, 0.606531f, 0.324652f, 0.135335f };
+    float Sum = Center.Visibility;
+    float SquareSum = Center.Visibility * Center.Visibility;
+    float WeightSum = 1.0f;
     // A tangent-plane test tolerates depth slope along one surface but rejects
     // nearby parallel surfaces. Normal agreement guards corners/curved silhouettes.
     // Cap the tolerance so derivative spikes at silhouettes cannot bridge surfaces.
     const float PlaneTolerance = clamp(Footprint * 0.25f, 0.25f, 2.0f);
-    [unroll] for (int Y = -2; Y <= 2; ++Y)
+    [loop] for (int Y = -4; Y <= 4; ++Y)
     {
-        [unroll] for (int X = -2; X <= 2; ++X)
+        [loop] for (int X = -4; X <= 4; ++X)
         {
             if (X == 0 && Y == 0) { continue; }
-            const float2 SampleUV = UV + float2(X, Y) * (AOFilterRadius * 0.5f) * Input_ExtentInverse;
+            const float2 SampleUV = UV + float2(X, Y) * (AOFilterRadius * 0.25f) * Input_ExtentInverse;
             // Reject outside this view, not just outside the pooled texture.
             if (any(SampleUV < Input_UVViewportBilinearMin) || any(SampleUV > Input_UVViewportBilinearMax)) { continue; }
             const float4 Provider = Center.Source == 1u
@@ -214,12 +218,18 @@ float FilterDeferredToonAO(float2 UV, FDeferredToonOcclusion Center, float3 Cent
             const float3 SampleNormal = GetGBufferData(SampleUV).WorldNormal;
             const float NormalAgreement = saturate(dot(CenterNormal, SampleNormal));
             if (NormalAgreement < 0.85f) { continue; }
-            const float W = Gaussian[X + 2] * Gaussian[Y + 2] * pow(NormalAgreement, 8.0f);
-            Sum += saturate(Provider.a) * W;
+            const float W = Gaussian[X + 4] * Gaussian[Y + 4] * pow(NormalAgreement, 8.0f);
+            const float Visibility = saturate(Provider.a);
+            Sum += Visibility * W;
+            SquareSum += Visibility * Visibility * W;
             WeightSum += W;
         }
     }
-    return saturate(Sum / WeightSum);
+    const float Mean = Sum / WeightSum;
+    const float Variance = max(SquareSum / WeightSum - Mean * Mean, 0.0f);
+    // Bias uncertain neighborhoods toward unoccluded. This removes noisy fringe
+    // instead of preserving its area; uniform AO is unchanged. Keep the final step hard.
+    return saturate(Mean + AOFilterConservatism * sqrt(Variance));
 }
 
 // [DeferredToon] Visibility is dimensionless; do not classify material/GI brightness.

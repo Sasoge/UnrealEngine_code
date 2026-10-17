@@ -22,9 +22,14 @@ namespace
 		ECVF_RenderThreadSafe);
 
     // [DeferredToon] Spatial filtering only; zero allows comparison with raw thresholding.
+    TAutoConsoleVariable<float> CVarDeferredToonAOFilterConservatism(
+        TEXT("r.Toon.DeferredVolumes.AOFilterConservatism"), 0.5f,
+        TEXT("Reject noisy AO fringe before hard thresholding by adding local standard deviation to visibility (0-2, default 0.5). Higher values shrink uncertain occlusion; uniform AO is unchanged."),
+        ECVF_RenderThreadSafe);
+
     TAutoConsoleVariable<float> CVarDeferredToonAOFilterRadius(
-        TEXT("r.Toon.DeferredVolumes.AOFilterRadius"), 2.0f,
-        TEXT("Geometry-aware AO filter radius in input render pixels before hard thresholding (0-4, default 2). Zero disables. No temporal history; raw AO views remain unchanged."),
+        TEXT("r.Toon.DeferredVolumes.AOFilterRadius"), 8.0f,
+        TEXT("Geometry-aware AO filter radius in input render pixels before hard thresholding (0-8, default 8). Zero disables. No temporal history; raw AO views remain unchanged."),
         ECVF_RenderThreadSafe);
 
 	TAutoConsoleVariable<int32> CVarDeferredToonVolumesDebugView(
@@ -111,6 +116,7 @@ namespace
 			SHADER_PARAMETER(uint32, bHardIndirectOcclusion)
             SHADER_PARAMETER(float, IndirectOcclusionThreshold)
             SHADER_PARAMETER(float, AOFilterRadius)
+            SHADER_PARAMETER(float, AOFilterConservatism)
             SHADER_PARAMETER(uint32, bUnifiedIndirectOcclusion) // [DeferredToon]
 			SHADER_PARAMETER(float, ShadowTextureWeight)
 			SHADER_PARAMETER(FVector2f, ShadowTextureTiling)
@@ -270,7 +276,8 @@ namespace
         PassParameters->LumenShortRangeAOStrength = Volume.LumenShortRangeAOStrength;
         PassParameters->bHardIndirectOcclusion = Volume.bHardIndirectOcclusion ? 1u : 0u;
         PassParameters->IndirectOcclusionThreshold = Volume.IndirectOcclusionThreshold;
-        PassParameters->AOFilterRadius = FMath::Clamp(CVarDeferredToonAOFilterRadius.GetValueOnRenderThread(), 0.0f, 4.0f);
+        PassParameters->AOFilterRadius = FMath::Clamp(CVarDeferredToonAOFilterRadius.GetValueOnRenderThread(), 0.0f, 8.0f);
+        PassParameters->AOFilterConservatism = FMath::Clamp(CVarDeferredToonAOFilterConservatism.GetValueOnRenderThread(), 0.0f, 2.0f);
         PassParameters->bUnifiedIndirectOcclusion = Volume.bUnifiedIndirectOcclusion ? 1u : 0u; // [DeferredToon]
 		PassParameters->ShadowTextureWeight = Volume.ShadowTextureWeight;
 		PassParameters->ShadowTextureTiling = FVector2f(Volume.ShadowTextureTiling);

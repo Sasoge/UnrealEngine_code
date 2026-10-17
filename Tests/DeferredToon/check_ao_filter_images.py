@@ -16,23 +16,30 @@ def metrics(m):
     perimeter=int((m[1:,:]!=m[:-1,:]).sum()+(m[:,1:]!=m[:,:-1]).sum())
     return small,perimeter,int(m.sum())
 off=[mask(f'lumen-p0-r0-{i}') for i in range(5)]
-on=[mask(f'lumen-p0-r2-{i}') for i in range(5)]
+on=[mask(f'lumen-p0-r8-{i}') for i in range(5)]
 def flicker(images): return float(np.mean([np.count_nonzero(a!=b) for a,b in zip(images,images[1:])]))
 raw_flicker=flicker(off); filtered_flicker=flicker(on)
 print('static changed pixels:',raw_flicker,filtered_flicker)
-assert filtered_flicker<raw_flicker*.8,'No material reduction of static AO edge noise'
+assert filtered_flicker<raw_flicker*.6,'No material reduction of static AO edge noise'
+raw_relative=raw_flicker/np.mean([m.sum() for m in off])
+filtered_relative=filtered_flicker/np.mean([m.sum() for m in on])
+print('changed pixels / AO area:',raw_relative,filtered_relative)
+assert filtered_relative<raw_relative*.8,'Reduced noise only by erasing AO'
 for pose in range(3):
-    raw=mask(f'lumen-p{pose}-r0-0'); filtered=mask(f'lumen-p{pose}-r2-0')
+    raw=mask(f'lumen-p{pose}-r0-0'); filtered=mask(f'lumen-p{pose}-r8-0')
     a=metrics(raw); b=metrics(filtered)
     print('pose',pose,'small components/perimeter/area',a,b)
     assert b[1]<a[1]*.9,'No reduction of jagged edge perimeter'
     assert b[0]<=a[0],'Added isolated speckles'
-    assert .7<b[2]/a[2]<1.3,'AO was erased or grew excessively'
-for r in [0,2]:
+    # User prefers a clean, smaller footprint. Retain a substantial dark core.
+    assert .25<b[2]/a[2]<1.1,'AO core was erased or grew excessively'
+    assert b[1]/np.sqrt(b[2]) < .7*a[1]/np.sqrt(a[2]),'Boundary roughness remains high after normalizing for area'
+assert mask('lumen-shrink').sum()<mask('lumen-no-shrink').sum(),'Conservative filter did not shrink uncertain fringe'
+for r in [0,8]:
     for i in range(2): mask(f'sky-r{r}-{i}')
 for provider in ['lumen','sky']:
     valid=read(provider+'-valid').mean(axis=2)>100
-    m=on[0] if provider=='lumen' else mask('sky-r2-0')
+    m=on[0] if provider=='lumen' else mask('sky-r8-0')
     assert (m[~valid]>0).sum()<10,'Filtered AO leaked into unavailable pixels'
     error=float(np.abs(read(provider+'-raw-off')-read(provider+'-raw-on')).mean())
     print(provider,'raw AO diagnostic MAE',error)
