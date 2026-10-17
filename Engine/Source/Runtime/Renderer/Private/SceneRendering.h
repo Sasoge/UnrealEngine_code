@@ -977,7 +977,8 @@ struct FGTAOTAAHistory
 struct FDeferredToonAOHistory
 {
     TRefCountPtr<IPooledRenderTarget> State; // mask, depth-derived plane offset, history reason, source
-    TRefCountPtr<IPooledRenderTarget> Visibility; // continuous visibility and age
+    TRefCountPtr<IPooledRenderTarget> Visibility; // continuous visibility, age, consecutive dark observations, unused
+    FVector2f ConfirmationSettings = FVector2f(0,0);
     float TemporalWeight = 0;
     FIntRect ViewRect;
     FVector4f FilterSettings = FVector4f(0,0,0,0);

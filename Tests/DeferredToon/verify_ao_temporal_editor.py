@@ -153,7 +153,7 @@ def tick(delta):
             action()
             unreal.log('AO_TEMPORAL_PHASE: ' + name)
         frame += 1
-        warmup = 240 if phase == 0 else (1 if name == 'cut-accepted' else 30)
+        warmup = 240 if phase == 0 else (1 if name.startswith('cut-') else 30)
         if frame < warmup:
             return
         if sample >= count:

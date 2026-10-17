@@ -54,6 +54,13 @@ namespace
         TEXT("r.Toon.DeferredVolumes.AOTemporalWeight"), 0.85f,
         TEXT("Continuous AO history weight before binary threshold (0-0.95, default 0.85). Zero disables scalar accumulation, keeping reprojection and hysteresis."), ECVF_RenderThreadSafe);
 
+    TAutoConsoleVariable<int32> CVarDeferredToonAODarkConfirmationFrames(
+        TEXT("r.Toon.DeferredVolumes.AODarkConfirmationFrames"), 3,
+        TEXT("Consecutive reprojected dark observations before hard AO appears (1-8, default 3). One restores immediate entry. Requires temporal stabilization."), ECVF_RenderThreadSafe);
+    TAutoConsoleVariable<int32> CVarDeferredToonAOMinDarkSupport(
+        TEXT("r.Toon.DeferredVolumes.AOMinDarkSupport"), 5,
+        TEXT("Minimum dark same-surface taps in a 3x3 neighborhood (0-9, default 5), also requiring 50 percent coverage. Zero disables the conservative fringe gate. Requires temporal stabilization."), ECVF_RenderThreadSafe);
+
     class FDeferredToonAOFilterPS : public FGlobalShader
     {
     public:
@@ -85,6 +92,9 @@ namespace
             SHADER_PARAMETER(uint32, bAOHistoryValid)
             SHADER_PARAMETER(float, AOHysteresis)
             SHADER_PARAMETER(float, AOTemporalWeight)
+            SHADER_PARAMETER(uint32, AODarkConfirmationFrames)
+            SHADER_PARAMETER(uint32, AOMinDarkSupport)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOCurrentVisibilityTexture)
             SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOHistoryVisibilityTexture)
             SHADER_PARAMETER(FIntPoint, AOFilterDirection)
             RENDER_TARGET_BINDING_SLOTS()
@@ -101,7 +111,7 @@ namespace
     static FRDGTextureRef AddAOStage(FRDGBuilder& GraphBuilder, const FViewInfo& View,
         const FScreenPassTexture& Input, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures,
         int32 Stage, const FDeferredToonAOTextures& AO, FRDGTextureRef Mask = nullptr,
-        FIntPoint Direction = FIntPoint::ZeroValue, float Threshold = 0.8f, FRDGTextureRef SecondTarget = nullptr, const FDeferredToonAOHistory* History = nullptr)
+        FIntPoint Direction = FIntPoint::ZeroValue, float Threshold = 0.8f, FRDGTextureRef SecondTarget = nullptr, const FDeferredToonAOHistory* History = nullptr, FRDGTextureRef CurrentVisibility = nullptr)
     {
         const auto& Textures = View.GetSceneTextures();
         const FRDGTextureRef Black = GSystemTextures.GetBlackDummy(GraphBuilder);
@@ -120,6 +130,9 @@ namespace
         P->AOMomentsTexture = AO.Moments ? AO.Moments : Black;
         P->AOMaskTexture = Mask ? Mask : Black;
         P->bAOHistoryValid = History != nullptr;
+        P->AODarkConfirmationFrames = FMath::Clamp(CVarDeferredToonAODarkConfirmationFrames.GetValueOnRenderThread(), 1, 8);
+        P->AOMinDarkSupport = FMath::Clamp(CVarDeferredToonAOMinDarkSupport.GetValueOnRenderThread(), 0, 9);
+        P->AOCurrentVisibilityTexture = CurrentVisibility ? CurrentVisibility : Black;
         P->AOTemporalWeight = FMath::Clamp(CVarDeferredToonAOTemporalWeight.GetValueOnRenderThread(), 0.0f, 0.95f);
         P->AOHistoryVisibilityTexture = History ? GraphBuilder.RegisterExternalTexture(History->Visibility) : Black;
         P->AOHistoryTexture = History ? GraphBuilder.RegisterExternalTexture(History->State) : Black;
@@ -171,6 +184,9 @@ namespace
         const float Hysteresis = FMath::Clamp(CVarDeferredToonAOHysteresis.GetValueOnRenderThread(), 0.0f, 0.2f);
         const float TemporalWeight = FMath::Clamp(CVarDeferredToonAOTemporalWeight.GetValueOnRenderThread(), 0.0f, 0.95f);
         const bool bTemporal = View.ViewState && Hysteresis > 0;
+        const FVector2f ConfirmationSettings(
+            float(FMath::Clamp(CVarDeferredToonAODarkConfirmationFrames.GetValueOnRenderThread(), 1, 8)),
+            float(FMath::Clamp(CVarDeferredToonAOMinDarkSupport.GetValueOnRenderThread(), 0, 9)));
         const FVector4f Settings(CVarDeferredToonAOFilterRadius.GetValueOnRenderThread(),
             CVarDeferredToonAOFilterConservatism.GetValueOnRenderThread(), Hysteresis,
             float(CVarDeferredToonAOCleanup.GetValueOnRenderThread() != 0));
@@ -181,7 +197,7 @@ namespace
             || History->State->GetDesc().Extent != Input.Texture->Desc.Extent
             || History->Visibility->GetDesc().Extent != Input.Texture->Desc.Extent
             || History->FilterSettings != Settings || History->Threshold != Volume.IndirectOcclusionThreshold
-            || History->TemporalWeight != TemporalWeight)
+            || History->TemporalWeight != TemporalWeight || History->ConfirmationSettings != ConfirmationSettings)
         {
             History = nullptr;
         }
@@ -190,7 +206,7 @@ namespace
         {
             Visibility = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(
                 Input.Texture->Desc.Extent, PF_G16R16F, FClearValueBinding::None,
-                TexCreate_ShaderResource | TexCreate_RenderTargetable), TEXT("DeferredToon.AOVisibilityHistory"));
+                TexCreate_ShaderResource | TexCreate_RenderTargetable), TEXT("DeferredToon.AOCurrentVisibility"));
             AO.Moments = AddAOStage(GraphBuilder, View, Input, SceneTextures, 6, AO, nullptr,
                 FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold, Visibility, History);
         }
@@ -203,8 +219,11 @@ namespace
                 FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold);
         }
         if (!bTemporal) { return Mask; }
+        const FRDGTextureRef ConfirmedVisibility = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(
+            Input.Texture->Desc.Extent, PF_FloatRGBA, FClearValueBinding::None,
+            TexCreate_ShaderResource | TexCreate_RenderTargetable), TEXT("DeferredToon.AOConfirmedVisibilityHistory"));
         const FRDGTextureRef State = AddAOStage(GraphBuilder, View, Input, SceneTextures, 5, AO, Mask,
-            FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold, nullptr, History);
+            FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold, ConfirmedVisibility, History, Visibility);
         if (!View.bStatePrevViewInfoIsReadOnly)
         {
             auto Next = MakeShared<FDeferredToonAOHistory>();
@@ -212,9 +231,10 @@ namespace
             Next->FilterSettings = Settings;
             Next->Threshold = Volume.IndirectOcclusionThreshold;
             Next->TemporalWeight = TemporalWeight;
+            Next->ConfirmationSettings = ConfirmationSettings;
             View.ViewState->PrevFrameViewInfo.DeferredToonAOHistories.Add(Volume.GetStableSortPath(), Next);
             GraphBuilder.QueueTextureExtraction(State, &Next->State);
-            GraphBuilder.QueueTextureExtraction(Visibility, &Next->Visibility);
+            GraphBuilder.QueueTextureExtraction(ConfirmedVisibility, &Next->Visibility);
         }
         return State;
     }
