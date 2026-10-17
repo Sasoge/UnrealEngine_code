@@ -1,0 +1,144 @@
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "PostProcessCommon.ush"
+#include "ScreenPass.ush"
+
+// [DeferredToon] Spatial-only AO processing. Never consume shaded RGB or material normals.
+SCREEN_PASS_TEXTURE_VIEWPORT(Input)
+Texture2D IndirectDiffuseTexture;
+Texture2D SkyDiffuseBeforeAOTexture;
+Texture2D LumenDiffuseBeforeShortAOTexture;
+Texture2D AOGeometryTexture;
+Texture2D AOMomentsTexture;
+Texture2D AOMaskTexture;
+uint bSkyOcclusionAvailable;
+uint bLumenShortAOAvailable;
+float AOFilterRadius;
+float AOFilterConservatism;
+float AOThreshold;
+int2 AOFilterDirection;
+
+bool Inside(float2 UV)
+{
+    return all(UV >= Input_UVViewportBilinearMin) && all(UV <= Input_UVViewportBilinearMax);
+}
+float3 Position(float2 UV)
+{
+    UV = clamp(UV, Input_UVViewportBilinearMin, Input_UVViewportBilinearMax);
+    const float Z = SceneTexturesStruct.SceneDepthTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).r;
+    return SvPositionToTranslatedWorld(float4(floor(UV * Input_Extent) + 0.5f, Z, 1));
+}
+float3 SurfaceNormal(float2 UV, float3 P)
+{
+    const float2 DX = float2(Input_ExtentInverse.x, 0);
+    const float2 DY = float2(0, Input_ExtentInverse.y);
+    const float3 R = Position(UV + DX) - P, L = P - Position(UV - DX);
+    const float3 D = Position(UV + DY) - P, U = P - Position(UV - DY);
+    // Choose the closer neighbor on each axis, avoiding silhouette depth jumps.
+    const float3 X = !Inside(UV - DX) ? R : (!Inside(UV + DX) ? L : (dot(R,R) < dot(L,L) ? R : L));
+    const float3 Y = !Inside(UV - DY) ? D : (!Inside(UV + DY) ? U : (dot(D,D) < dot(U,U) ? D : U));
+    const float3 N = cross(X, Y);
+    return N * rsqrt(max(dot(N,N), 1e-20f));
+}
+float SurfaceWeight(float2 UV, float3 P, float4 Geometry)
+{
+    if (!Inside(UV)) { return 0; }
+    const float4 Other = AOGeometryTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    if (Other.a != Geometry.a || Other.a == 0) { return 0; }
+    const float Agreement = saturate(dot(Geometry.xyz, Other.xyz));
+    if (Agreement < 0.85f) { return 0; }
+    const float3 Delta = Position(UV) - P;
+    // Symmetric plane test; geometric normals are unaffected by normal maps.
+    const float PlaneError = max(abs(dot(Delta, Geometry.xyz)), abs(dot(Delta, Other.xyz)));
+    const float Tolerance = clamp(length(Delta) * 0.05f, 0.25f, 2.0f);
+    if (PlaneError > Tolerance) { return 0; }
+    return pow(Agreement, 8.0f);
+}
+float HardMask(float2 UV)
+{
+    const float4 M = AOMomentsTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    if (M.a == 0) { return 1; }
+    const float Visibility = saturate(M.r + AOFilterConservatism * sqrt(max(M.g - M.r*M.r, 0)));
+    return step(saturate(AOThreshold), Visibility);
+}
+
+void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition : SV_POSITION,
+    out float4 OutColor : SV_Target0
+#if AO_FILTER_STAGE == 0
+    , out float4 OutMoments : SV_Target1
+#endif
+)
+{
+    const float2 UV = SvPosition.xy * Input_ExtentInverse;
+#if AO_FILTER_STAGE == 0
+    float Visibility = 1;
+    uint Source = 0;
+    if (IndirectDiffuseTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).a > 0.5f)
+    {
+        const float Lumen = LumenDiffuseBeforeShortAOTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).a;
+        const float Sky = SkyDiffuseBeforeAOTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).a;
+        if (bLumenShortAOAvailable != 0 && Lumen >= 0) { Source = 1; Visibility = saturate(Lumen); }
+        else if (bSkyOcclusionAvailable != 0 && Sky >= 0) { Source = 2; Visibility = saturate(Sky); }
+    }
+    const float3 N = Source != 0 ? SurfaceNormal(UV, Position(UV)) : 0;
+    OutColor = float4(N, Source);
+    OutMoments = float4(Visibility, Visibility*Visibility, Source != 0 ? 1 : 0, Source);
+#elif AO_FILTER_STAGE == 1
+    const float4 G = AOGeometryTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    const float4 Center = AOMomentsTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    if (G.a == 0) { OutColor = float4(1,1,0,0); return; }
+    const float3 P = Position(UV);
+    float3 Sum = Center.rgb;
+    float Weight = 1;
+    float KernelWeight = 1;
+    const float Sigma = max(AOFilterRadius * 0.5f, 0.5f);
+    // Every integer texel in the radius participates. No two-pixel sampling lattice.
+    [loop] for (int Offset = -8; Offset <= 8; ++Offset)
+    {
+        if (Offset == 0 || abs(Offset) > AOFilterRadius) { continue; }
+        const float Spatial = exp(-0.5f * Offset * Offset / (Sigma * Sigma));
+        KernelWeight += Spatial;
+        const float2 SampleUV = UV + float2(AOFilterDirection * Offset) * Input_ExtentInverse;
+        const float W = Spatial * SurfaceWeight(SampleUV, P, G);
+        if (W <= 0) { continue; }
+        Sum += AOMomentsTexture.SampleLevel(GlobalPointClampedSampler, SampleUV, 0).rgb * W;
+        Weight += W;
+    }
+    OutColor = float4(Sum.rg / Weight, Sum.b / KernelWeight, G.a);
+#elif AO_FILTER_STAGE == 2
+    OutColor = HardMask(UV).xxxx;
+#else
+    const float4 G = AOGeometryTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    if (G.a == 0) { OutColor = 1; return; }
+    const float3 P = Position(UV);
+    float Mask = AOMaskTexture.SampleLevel(GlobalPointClampedSampler, UV, 0).r;
+    uint SupportCount = 1;
+    [unroll] for (int Y = -1; Y <= 1; ++Y)
+    {
+        [unroll] for (int X = -1; X <= 1; ++X)
+        {
+            if (X == 0 && Y == 0) { continue; }
+            const float2 SampleUV = UV + float2(X,Y) * Input_ExtentInverse;
+            if (!Inside(SampleUV)) { continue; }
+            if (SurfaceWeight(SampleUV, P, G) <= 0) { continue; }
+            ++SupportCount;
+            const float Other = AOMaskTexture.SampleLevel(GlobalPointClampedSampler, SampleUV, 0).r;
+#if AO_FILTER_STAGE == 3
+            Mask = max(Mask, Other); // Erode the dark set, preserving hard output.
+#else
+            Mask = min(Mask, Other); // Restore supported cores, not isolated dots.
+#endif
+        }
+    }
+#if AO_FILTER_STAGE == 3
+    // Remove isolated subpixel surfaces, but do not erode every real geometric edge.
+    // A supported edge/corner has at least four same-surface texels in this neighborhood.
+    if (SupportCount < 4) { Mask = 1; }
+#endif
+#if AO_FILTER_STAGE == 4
+    // Gated neighborhoods need not be identical: explicitly forbid growing darkness.
+    Mask = max(Mask, HardMask(UV));
+#endif
+    OutColor = Mask.xxxx;
+#endif
+}

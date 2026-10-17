@@ -39,6 +39,116 @@ namespace
 		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light), 25 indirect diffuse (Lumen or dynamic sky), 26 indirect availability, 27 sky diffuse before AO, 28 sky combined AO (white=unoccluded), 29 sky split availability, 30 Lumen short AO, 31 Lumen diffuse before short AO, 32 Lumen short AO availability, 33 auto AO, 34 auto diffuse before AO, 35 auto availability, 36 provider (cyan=Lumen/orange=sky/black=none), 37 indirect two-tone mask, 38 AO two-tone mask (white=unoccluded)."),
 		ECVF_RenderThreadSafe);
 
+    TAutoConsoleVariable<int32> CVarDeferredToonAOCleanup(
+        TEXT("r.Toon.DeferredVolumes.AOCleanup"), 1,
+        TEXT("Remove tiny dark AO features with geometry-aware hard-mask opening. 0 disables; 1 enables (default)."), ECVF_RenderThreadSafe);
+    TAutoConsoleVariable<int32> CVarDeferredToonAOFilterDebug(
+        TEXT("r.Toon.DeferredVolumes.AOFilterDebug"), 0,
+        TEXT("Override view 38 only: 0 hard AO, 1 filtered continuous visibility, 2 filter support, 3 depth-derived normals."), ECVF_RenderThreadSafe);
+
+    class FDeferredToonAOFilterPS : public FGlobalShader
+    {
+    public:
+        DECLARE_GLOBAL_SHADER(FDeferredToonAOFilterPS);
+        SHADER_USE_PARAMETER_STRUCT(FDeferredToonAOFilterPS, FGlobalShader);
+        class FStage : SHADER_PERMUTATION_INT("AO_FILTER_STAGE", 5);
+        using FPermutationDomain = TShaderPermutationDomain<FStage>;
+        static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+        {
+            return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5) && !IsForwardShadingEnabled(Parameters.Platform);
+        }
+        BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+            SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
+            SHADER_PARAMETER_STRUCT(FScreenPassTextureViewportParameters, Input)
+            SHADER_PARAMETER_RDG_UNIFORM_BUFFER(FSceneTextureUniformParameters, SceneTextures)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, IndirectDiffuseTexture)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SkyDiffuseBeforeAOTexture)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, LumenDiffuseBeforeShortAOTexture)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOGeometryTexture)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOMomentsTexture)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOMaskTexture)
+            SHADER_PARAMETER(uint32, bSkyOcclusionAvailable)
+            SHADER_PARAMETER(uint32, bLumenShortAOAvailable)
+            SHADER_PARAMETER(float, AOFilterRadius)
+            SHADER_PARAMETER(float, AOFilterConservatism)
+            SHADER_PARAMETER(float, AOThreshold)
+            SHADER_PARAMETER(FIntPoint, AOFilterDirection)
+            RENDER_TARGET_BINDING_SLOTS()
+        END_SHADER_PARAMETER_STRUCT()
+    };
+    IMPLEMENT_GLOBAL_SHADER(FDeferredToonAOFilterPS, "/Engine/Private/DeferredToonAOFilter.usf", "MainPS", SF_Pixel);
+
+    struct FDeferredToonAOTextures
+    {
+        FRDGTextureRef Geometry = nullptr;
+        FRDGTextureRef Moments = nullptr;
+    };
+
+    static FRDGTextureRef AddAOStage(FRDGBuilder& GraphBuilder, const FViewInfo& View,
+        const FScreenPassTexture& Input, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures,
+        int32 Stage, const FDeferredToonAOTextures& AO, FRDGTextureRef Mask = nullptr,
+        FIntPoint Direction = FIntPoint::ZeroValue, float Threshold = 0.8f, FRDGTextureRef SecondTarget = nullptr)
+    {
+        const auto& Textures = View.GetSceneTextures();
+        const FRDGTextureRef Black = GSystemTextures.GetBlackDummy(GraphBuilder);
+        auto Produced = [](FRDGTextureRef Texture) { return Texture && HasBeenProduced(Texture); };
+        auto* P = GraphBuilder.AllocParameters<FDeferredToonAOFilterPS::FParameters>();
+        P->View = View.ViewUniformBuffer;
+        const FScreenPassTextureViewport Viewport(Input);
+        P->Input = GetScreenPassTextureViewportParameters(Viewport);
+        P->SceneTextures = SceneTextures;
+        P->IndirectDiffuseTexture = Produced(Textures.ToonIndirectDiffuse) ? Textures.ToonIndirectDiffuse : Black;
+        P->bSkyOcclusionAvailable = Produced(Textures.ToonSkyDiffuseBeforeAO);
+        P->bLumenShortAOAvailable = Produced(Textures.ToonLumenDiffuseBeforeShortAO);
+        P->SkyDiffuseBeforeAOTexture = P->bSkyOcclusionAvailable ? Textures.ToonSkyDiffuseBeforeAO : Black;
+        P->LumenDiffuseBeforeShortAOTexture = P->bLumenShortAOAvailable ? Textures.ToonLumenDiffuseBeforeShortAO : Black;
+        P->AOGeometryTexture = AO.Geometry ? AO.Geometry : Black;
+        P->AOMomentsTexture = AO.Moments ? AO.Moments : Black;
+        P->AOMaskTexture = Mask ? Mask : Black;
+        P->AOFilterDirection = Direction;
+        P->AOFilterRadius = FMath::Clamp(CVarDeferredToonAOFilterRadius.GetValueOnRenderThread(), 0.0f, 8.0f);
+        P->AOFilterConservatism = FMath::Clamp(CVarDeferredToonAOFilterConservatism.GetValueOnRenderThread(), 0.0f, 2.0f);
+        P->AOThreshold = Threshold;
+        const FRDGTextureRef Output = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(
+            Input.Texture->Desc.Extent, Stage == 0 ? PF_FloatRGBA : (Stage == 1 ? PF_A32B32G32R32F : PF_R16F), FClearValueBinding::None,
+            TexCreate_ShaderResource | TexCreate_RenderTargetable), TEXT("DeferredToon.AOSpatial"));
+        P->RenderTargets[0] = FRenderTargetBinding(Output, ERenderTargetLoadAction::ENoAction);
+        if (SecondTarget) { P->RenderTargets[1] = FRenderTargetBinding(SecondTarget, ERenderTargetLoadAction::ENoAction); }
+        FDeferredToonAOFilterPS::FPermutationDomain Permutation;
+        Permutation.Set<FDeferredToonAOFilterPS::FStage>(Stage);
+        TShaderMapRef<FDeferredToonAOFilterPS> Shader(View.ShaderMap, Permutation);
+        AddDrawScreenPass(GraphBuilder, RDG_EVENT_NAME("DeferredToon AO Stage %d (%d,%d)", Stage, Direction.X, Direction.Y),
+            View, Viewport, Viewport, Shader, P);
+        return Output;
+    }
+
+    static FDeferredToonAOTextures AddAOFilter(FRDGBuilder& GraphBuilder, const FViewInfo& View,
+        const FScreenPassTexture& Input, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures)
+    {
+        FDeferredToonAOTextures AO;
+        const auto& Textures = View.GetSceneTextures();
+        if (CVarDeferredToonAOFilterRadius.GetValueOnRenderThread() <= 0 || !Textures.ToonIndirectDiffuse
+            || !HasBeenProduced(Textures.ToonIndirectDiffuse)) { return AO; }
+        const bool bSky = Textures.ToonSkyDiffuseBeforeAO && HasBeenProduced(Textures.ToonSkyDiffuseBeforeAO);
+        const bool bLumen = Textures.ToonLumenDiffuseBeforeShortAO && HasBeenProduced(Textures.ToonLumenDiffuseBeforeShortAO);
+        if (!bSky && !bLumen) { return AO; }
+        // FP32 moments avoid FP16 rounding turning a flat field into apparent variance.
+        const FRDGTextureRef Seed = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(
+            Input.Texture->Desc.Extent, PF_A32B32G32R32F, FClearValueBinding::None,
+            TexCreate_ShaderResource | TexCreate_RenderTargetable), TEXT("DeferredToon.AOSeedMoments"));
+        AO.Geometry = AddAOStage(GraphBuilder, View, Input, SceneTextures, 0, AO, nullptr, FIntPoint::ZeroValue, 0, Seed);
+        AO.Moments = Seed;
+        AO.Moments = AddAOStage(GraphBuilder, View, Input, SceneTextures, 1, AO, nullptr, FIntPoint(1,0));
+        AO.Moments = AddAOStage(GraphBuilder, View, Input, SceneTextures, 1, AO, nullptr, FIntPoint(0,1));
+        return AO;
+    }
+
+    static bool NeedsHardAO(const FDeferredToonVolumeSceneProxy& Volume, uint32 DebugView)
+    {
+        return DebugView == 38u || (Volume.bHardIndirectOcclusion
+            && (DebugView == 37u || (DebugView == 0u && uint32(Volume.OutputMode) == 4u)));
+    }
+
 	class FDeferredToonVolumePS : public FGlobalShader
 	{
 	public:
@@ -115,8 +225,11 @@ namespace
 			SHADER_PARAMETER(float, LumenShortRangeAOStrength)
 			SHADER_PARAMETER(uint32, bHardIndirectOcclusion)
             SHADER_PARAMETER(float, IndirectOcclusionThreshold)
-            SHADER_PARAMETER(float, AOFilterRadius)
-            SHADER_PARAMETER(float, AOFilterConservatism)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOMomentsTexture)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOGeometryTexture)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AOMaskTexture)
+            SHADER_PARAMETER(uint32, bFilteredAOAvailable)
+            SHADER_PARAMETER(uint32, AOFilterDebug)
             SHADER_PARAMETER(uint32, bUnifiedIndirectOcclusion) // [DeferredToon]
 			SHADER_PARAMETER(float, ShadowTextureWeight)
 			SHADER_PARAMETER(FVector2f, ShadowTextureTiling)
@@ -176,6 +289,7 @@ namespace
 		const FScreenPassTextureSlice& SceneColor,
 		const FScreenPassTexture& OriginalSceneColor,
 		const FDeferredToonVolumeSceneProxy& Volume,
+        const FDeferredToonAOTextures& SharedAO,
 		TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures)
 	{
 		const FScreenPassTexture Input = FScreenPassTexture::CopyFromSlice(GraphBuilder, SceneColor);
@@ -276,8 +390,21 @@ namespace
         PassParameters->LumenShortRangeAOStrength = Volume.LumenShortRangeAOStrength;
         PassParameters->bHardIndirectOcclusion = Volume.bHardIndirectOcclusion ? 1u : 0u;
         PassParameters->IndirectOcclusionThreshold = Volume.IndirectOcclusionThreshold;
-        PassParameters->AOFilterRadius = FMath::Clamp(CVarDeferredToonAOFilterRadius.GetValueOnRenderThread(), 0.0f, 8.0f);
-        PassParameters->AOFilterConservatism = FMath::Clamp(CVarDeferredToonAOFilterConservatism.GetValueOnRenderThread(), 0.0f, 2.0f);
+        FRDGTextureRef HardMask = nullptr;
+        if (SharedAO.Moments && NeedsHardAO(Volume, DebugView))
+        {
+            HardMask = AddAOStage(GraphBuilder, View, Input, SceneTextures, 2, SharedAO, nullptr, FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold);
+            if (CVarDeferredToonAOCleanup.GetValueOnRenderThread() != 0)
+            {
+                HardMask = AddAOStage(GraphBuilder, View, Input, SceneTextures, 3, SharedAO, HardMask);
+                HardMask = AddAOStage(GraphBuilder, View, Input, SceneTextures, 4, SharedAO, HardMask, FIntPoint::ZeroValue, Volume.IndirectOcclusionThreshold);
+            }
+        }
+        PassParameters->bFilteredAOAvailable = HardMask ? 1u : 0u;
+        PassParameters->AOMaskTexture = HardMask ? HardMask : GSystemTextures.GetBlackDummy(GraphBuilder);
+        PassParameters->AOMomentsTexture = SharedAO.Moments ? SharedAO.Moments : GSystemTextures.GetBlackDummy(GraphBuilder);
+        PassParameters->AOGeometryTexture = SharedAO.Geometry ? SharedAO.Geometry : GSystemTextures.GetBlackDummy(GraphBuilder);
+        PassParameters->AOFilterDebug = FMath::Clamp(CVarDeferredToonAOFilterDebug.GetValueOnRenderThread(), 0, 3);
         PassParameters->bUnifiedIndirectOcclusion = Volume.bUnifiedIndirectOcclusion ? 1u : 0u; // [DeferredToon]
 		PassParameters->ShadowTextureWeight = Volume.ShadowTextureWeight;
 		PassParameters->ShadowTextureTiling = FVector2f(Volume.ShadowTextureTiling);
@@ -329,11 +456,21 @@ FScreenPassTextureSlice AddDeferredToonVolumePass(
 	FScreenPassTextureSlice Current = Inputs.SceneColor;
 	// [DeferredToon] Resolve once, not once per box, to avoid repeated residual subtraction.
 	const FScreenPassTexture OriginalSceneColor = FScreenPassTexture::CopyFromSlice(GraphBuilder, Inputs.SceneColor);
+    // Shared continuous filtering is independent of a box's threshold/palette.
+    FDeferredToonAOTextures SharedAO;
+    for (const FDeferredToonVolumeSceneProxy* Volume : Volumes)
+    {
+        if (Volume && NeedsHardAO(*Volume, Volume->DebugView == 255u ? uint32(GetDeferredToonVolumeDebugView()) : Volume->DebugView))
+        {
+            SharedAO = AddAOFilter(GraphBuilder, View, OriginalSceneColor, Inputs.SceneTextures);
+            break;
+        }
+    }
 	for (const FDeferredToonVolumeSceneProxy* Volume : Volumes)
 	{
 		if (Volume)
 		{
-			Current = AddVolumePass(GraphBuilder, View, Current, OriginalSceneColor, *Volume, Inputs.SceneTextures);
+			Current = AddVolumePass(GraphBuilder, View, Current, OriginalSceneColor, *Volume, SharedAO, Inputs.SceneTextures);
 		}
 	}
 	return Current;
