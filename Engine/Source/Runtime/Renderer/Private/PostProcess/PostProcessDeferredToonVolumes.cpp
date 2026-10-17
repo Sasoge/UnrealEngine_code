@@ -21,6 +21,12 @@ namespace
 		TEXT("Enables pre-tonemap deferred toon color volumes."),
 		ECVF_RenderThreadSafe);
 
+    // [DeferredToon] Spatial filtering only; zero allows comparison with raw thresholding.
+    TAutoConsoleVariable<float> CVarDeferredToonAOFilterRadius(
+        TEXT("r.Toon.DeferredVolumes.AOFilterRadius"), 2.0f,
+        TEXT("Geometry-aware AO filter radius in input render pixels before hard thresholding (0-4, default 2). Zero disables. No temporal history; raw AO views remain unchanged."),
+        ECVF_RenderThreadSafe);
+
 	TAutoConsoleVariable<int32> CVarDeferredToonVolumesDebugView(
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
@@ -104,6 +110,7 @@ namespace
 			SHADER_PARAMETER(float, LumenShortRangeAOStrength)
 			SHADER_PARAMETER(uint32, bHardIndirectOcclusion)
             SHADER_PARAMETER(float, IndirectOcclusionThreshold)
+            SHADER_PARAMETER(float, AOFilterRadius)
             SHADER_PARAMETER(uint32, bUnifiedIndirectOcclusion) // [DeferredToon]
 			SHADER_PARAMETER(float, ShadowTextureWeight)
 			SHADER_PARAMETER(FVector2f, ShadowTextureTiling)
@@ -263,6 +270,7 @@ namespace
         PassParameters->LumenShortRangeAOStrength = Volume.LumenShortRangeAOStrength;
         PassParameters->bHardIndirectOcclusion = Volume.bHardIndirectOcclusion ? 1u : 0u;
         PassParameters->IndirectOcclusionThreshold = Volume.IndirectOcclusionThreshold;
+        PassParameters->AOFilterRadius = FMath::Clamp(CVarDeferredToonAOFilterRadius.GetValueOnRenderThread(), 0.0f, 4.0f);
         PassParameters->bUnifiedIndirectOcclusion = Volume.bUnifiedIndirectOcclusion ? 1u : 0u; // [DeferredToon]
 		PassParameters->ShadowTextureWeight = Volume.ShadowTextureWeight;
 		PassParameters->ShadowTextureTiling = FVector2f(Volume.ShadowTextureTiling);

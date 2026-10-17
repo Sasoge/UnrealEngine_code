@@ -66,6 +66,7 @@ uint bOverrideLumenShortRangeAO;
 float LumenShortRangeAOStrength;
 uint bHardIndirectOcclusion;
 float IndirectOcclusionThreshold;
+float AOFilterRadius;
 uint bUnifiedIndirectOcclusion; // [DeferredToon]
 float ShadowTextureWeight;
 float2 ShadowTextureTiling;
@@ -150,7 +151,8 @@ float SelectDeferredToonChannel(float4 Value, uint Channel)
 struct FDeferredToonOcclusion
 {
     float3 BeforeAO;
-    float Visibility;
+    float Visibility; // Raw provider value remains available to diagnostics and semantic inputs.
+    float BandVisibility; // Geometry-filtered value used only for the hard threshold.
     uint Source; // 0 unavailable, 1 Lumen short AO, 2 dynamic sky combined AO.
 };
 FDeferredToonOcclusion ResolveDeferredToonOcclusion(float4 Sky, float4 Lumen, bool bValidIndirect)
@@ -171,13 +173,59 @@ FDeferredToonOcclusion ResolveDeferredToonOcclusion(float4 Sky, float4 Lumen, bo
         Result.Visibility = saturate(Sky.a);
         Result.Source = 2;
     }
+    Result.BandVisibility = Result.Visibility;
     return Result;
+}
+
+// [DeferredToon] Denoise visibility BEFORE the discontinuous step. Do not blur
+// RGB, binary output, raw diagnostics, or add a camera-motion history buffer.
+float FilterDeferredToonAO(float2 UV, FDeferredToonOcclusion Center, float3 CenterWorld, float3 CenterNormal, float Footprint)
+{
+    if (AOFilterRadius <= 0.0f || Center.Source == 0u)
+    {
+        return Center.Visibility;
+    }
+    const float Gaussian[5] = { 1, 4, 6, 4, 1 };
+    float Sum = Center.Visibility * 36.0f;
+    float WeightSum = 36.0f;
+    // A tangent-plane test tolerates depth slope along one surface but rejects
+    // nearby parallel surfaces. Normal agreement guards corners/curved silhouettes.
+    // Cap the tolerance so derivative spikes at silhouettes cannot bridge surfaces.
+    const float PlaneTolerance = clamp(Footprint * 0.25f, 0.25f, 2.0f);
+    [unroll] for (int Y = -2; Y <= 2; ++Y)
+    {
+        [unroll] for (int X = -2; X <= 2; ++X)
+        {
+            if (X == 0 && Y == 0) { continue; }
+            const float2 SampleUV = UV + float2(X, Y) * (AOFilterRadius * 0.5f) * Input_ExtentInverse;
+            // Reject outside this view, not just outside the pooled texture.
+            if (any(SampleUV < Input_UVViewportBilinearMin) || any(SampleUV > Input_UVViewportBilinearMax)) { continue; }
+            const float4 Provider = Center.Source == 1u
+                ? LumenDiffuseBeforeShortAOTexture.SampleLevel(GlobalPointClampedSampler, SampleUV, 0)
+                : SkyDiffuseBeforeAOTexture.SampleLevel(GlobalPointClampedSampler, SampleUV, 0);
+            if (Provider.a < 0 || IndirectDiffuseTexture.SampleLevel(GlobalPointClampedSampler, SampleUV, 0).a <= 0.5f) { continue; }
+            const float Z = SceneTexturesStruct.SceneDepthTexture.SampleLevel(GlobalPointClampedSampler, SampleUV, 0).r;
+            // Match reconstruction to the exact point-sampled depth texel, including
+            // fractional filter radii and offset editor view rectangles.
+            const float2 Pixel = floor(SampleUV * Input_Extent) + 0.5f;
+            const float3 SampleWorld = SvPositionToTranslatedWorld(float4(Pixel, Z, 1));
+            const float PlaneDistance = abs(dot(SampleWorld - CenterWorld, CenterNormal));
+            if (PlaneDistance > PlaneTolerance) { continue; }
+            const float3 SampleNormal = GetGBufferData(SampleUV).WorldNormal;
+            const float NormalAgreement = saturate(dot(CenterNormal, SampleNormal));
+            if (NormalAgreement < 0.85f) { continue; }
+            const float W = Gaussian[X + 2] * Gaussian[Y + 2] * pow(NormalAgreement, 8.0f);
+            Sum += saturate(Provider.a) * W;
+            WeightSum += W;
+        }
+    }
+    return saturate(Sum / WeightSum);
 }
 
 // [DeferredToon] Visibility is dimensionless; do not classify material/GI brightness.
 float DeferredToonAOBand(FDeferredToonOcclusion Occlusion)
 {
-    return Occlusion.Source != 0u ? step(saturate(IndirectOcclusionThreshold), Occlusion.Visibility) : 1.0f;
+    return Occlusion.Source != 0u ? step(saturate(IndirectOcclusionThreshold), Occlusion.BandVisibility) : 1.0f;
 }
 
 // [DeferredToon] Scene-linear indirect after the same AO controls used by composition.
@@ -413,7 +461,14 @@ void MainPS(
     const bool bValidSkySplit = bValidIndirect && bSkyOcclusionAvailable != 0u && SkyBeforeAO.a >= 0.0f;
     const float4 LumenBeforeShortAO = LumenDiffuseBeforeShortAOTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
     const bool bValidLumenShortAO = bValidIndirect && bLumenShortAOAvailable != 0u && LumenBeforeShortAO.a >= 0.0f; // [DeferredToon]
-    const FDeferredToonOcclusion Occlusion = ResolveDeferredToonOcclusion(SkyBeforeAO, LumenBeforeShortAO, bValidIndirect); // [DeferredToon]
+    FDeferredToonOcclusion Occlusion = ResolveDeferredToonOcclusion(SkyBeforeAO, LumenBeforeShortAO, bValidIndirect); // [DeferredToon]
+    const float AOFilterFootprint = max(length(ddx(TranslatedWorldPosition)), length(ddy(TranslatedWorldPosition)));
+    if (Occlusion.Source != 0u && (DebugView == 38u || (bHardIndirectOcclusion != 0u
+        && (DebugView == 37u || (DebugView == 0u && OutputMode == 4u && Weight > 0.0f)))))
+    {
+        const float3 AOFilterCenter = SvPositionToTranslatedWorld(float4(floor(UV * Input_Extent) + 0.5f, DeviceZ, 1));
+        Occlusion.BandVisibility = FilterDeferredToonAO(UV, Occlusion, AOFilterCenter, GBufferData.WorldNormal, AOFilterFootprint);
+    }
 	const float EffectiveLitMask = EffectiveLight.a > 0.0f ? step(max(EffectiveLightThreshold, 0.0f), EffectiveLight.a) : 0.0f;
 	const float DirectLightMask = EffectiveLitMask;
 	const float NativeShadowMask = saturate(ShadowBufferTexture.SampleLevel(ShadowBufferSampler, UV, 0).r);
