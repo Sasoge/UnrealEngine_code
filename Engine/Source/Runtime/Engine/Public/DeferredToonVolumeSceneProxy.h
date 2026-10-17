@@ -57,6 +57,9 @@ public:
     float OtherLightingWeight = 1.0f;
     // [DeferredToon] Optional independent indirect diffuse grade.
     bool bOverrideIndirectDiffuse = false;
+    uint8 IndirectDiffuseStyle = 0;
+    float IndirectDiffuseThreshold = 0.1f;
+    FLinearColor IndirectDiffuseDarkColor = FLinearColor::Black;
     float IndirectDiffuseIntensity = 1.0f;
     FLinearColor IndirectDiffuseColor = FLinearColor::White;
     float IndirectDiffuseColorReplaceWeight = 0.0f;

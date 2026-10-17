@@ -47,6 +47,14 @@ enum class EDeferredToonVolumeOutputMode : uint8
     DirectLightGrade = 4 UMETA(DisplayName="Direct Light Grade"),
 };
 
+// [DeferredToon] Preserve native color grading unless hard two-tone output is selected.
+UENUM(BlueprintType)
+enum class EDeferredToonIndirectDiffuseStyle : uint8
+{
+    ColorGrade = 0 UMETA(DisplayName="Color Grade"),
+    TwoTone = 1 UMETA(DisplayName="Hard Two-Tone"),
+};
+
 // [DeferredToon] Explicit compatibility mode avoids merging unequal saved settings.
 UENUM(BlueprintType)
 enum class EDeferredToonIndirectOcclusionMode : uint8
@@ -106,6 +114,7 @@ enum class EDeferredToonDebugView : uint8
     IndirectDiffuseBeforeOcclusion = 34 UMETA(DisplayName="34 - Indirect Diffuse Before Occlusion (Automatic)"),
     IndirectOcclusionCoverage = 35 UMETA(DisplayName="35 - Indirect Occlusion Availability"),
     IndirectOcclusionSource = 36 UMETA(DisplayName="36 - AO Source (Cyan=Lumen, Orange=Sky, Black=None)"),
+    IndirectDiffuseBand = 37 UMETA(DisplayName="37 - Indirect Diffuse Two-Tone Mask"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 
@@ -199,11 +208,21 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Intensity", ClampMin="0.0", UIMax="4.0", EditCondition="bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="1 preserves native indirect intensity; 0 removes the extracted indirect layer."))
     float IndirectDiffuseIntensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Color", HideAlphaChannel, EditCondition="bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Scene-linear tint or replacement color. White is neutral when Color Replacement is zero. Final UE exposure and tonemapping still apply."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Color", HideAlphaChannel, EditCondition="bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="In Hard Two-Tone this is the fixed lit-band color. Otherwise scene-linear tint or replacement color. White is neutral when Color Replacement is zero. Final UE exposure and tonemapping still apply."))
     FLinearColor IndirectDiffuseColor = FLinearColor::White;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Color Replacement", ClampMin="0.0", ClampMax="1.0", EditCondition="bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="0 multiplies native indirect by Color; 1 replaces it with Color, including zero-GI surfaces. Material Base Color Influence affects replacement only."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Color Replacement", ClampMin="0.0", ClampMax="1.0", EditCondition="bOverrideIndirectDiffuse && IndirectDiffuseStyle == EDeferredToonIndirectDiffuseStyle::ColorGrade && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="0 multiplies native indirect by Color; 1 replaces it with Color, including zero-GI surfaces. Material Base Color Influence affects replacement only."))
     float IndirectDiffuseColorReplaceWeight = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Shading Style", DisplayPriority="1", EditCondition="bOverrideIndirectDiffuse && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Color Grade preserves the existing tint/replacement. Hard Two-Tone outputs only the lit or dark color, without native intensity gradients inside each band."))
+    EDeferredToonIndirectDiffuseStyle IndirectDiffuseStyle = EDeferredToonIndirectDiffuseStyle::ColorGrade;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Two-Tone Threshold", ClampMin="0.0", UIMax="1.0", EditCondition="bOverrideIndirectDiffuse && IndirectDiffuseStyle == EDeferredToonIndirectDiffuseStyle::TwoTone && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Hard threshold of scene-linear indirect diffuse luminance after box AO adjustments, before authored intensity. This input includes material color: dark materials may select the dark band. Zero light always selects dark. Not normalized; HDR values may exceed 1."))
+    float IndirectDiffuseThreshold = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Dark Color", HideAlphaChannel, EditCondition="bOverrideIndirectDiffuse && IndirectDiffuseStyle == EDeferredToonIndirectDiffuseStyle::TwoTone && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Fixed scene-linear dark-band color. Existing Color supplies the lit band. Two-Tone ignores material color influence and color replacement; UE exposure and temporal antialiasing still apply."))
+    FLinearColor IndirectDiffuseDarkColor = FLinearColor::Black;
+
 
     // [DeferredToon] One authoring interface, selected by actual per-pixel provider validity.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Occlusion", meta=(DisplayName="Occlusion Control", DisplayPriority="0", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Unified automatically uses Lumen short-range AO or dynamic SkyLight occlusion. Native disables all box AO adjustments. Legacy preserves older separate settings."))
@@ -298,6 +317,9 @@ public:
     // [DeferredToon] Runtime setters invalidate the render-thread snapshot.
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOverrideIndirectDiffuse(bool NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseIntensity(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseStyle(EDeferredToonIndirectDiffuseStyle NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseThreshold(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseDarkColor(FLinearColor NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseColor(FLinearColor NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseColorReplaceWeight(float NewValue);
     // [DeferredToon] Runtime authoring invalidates the scene proxy.

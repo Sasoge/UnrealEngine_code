@@ -259,6 +259,9 @@ void UDeferredToonVolumeComponent::SetOtherLightingWeight(float NewValue) { DTOO
 // [DeferredToon] Indirect authoring is independent from direct band selection.
 void UDeferredToonVolumeComponent::SetOverrideIndirectDiffuse(bool NewValue) { DTOON_SET(bOverrideIndirectDiffuse, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetIndirectDiffuseIntensity(float NewValue) { DTOON_SET(IndirectDiffuseIntensity, FMath::Max(NewValue, 0.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetIndirectDiffuseStyle(EDeferredToonIndirectDiffuseStyle NewValue) { DTOON_SET(IndirectDiffuseStyle, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetIndirectDiffuseThreshold(float NewValue) { DTOON_SET(IndirectDiffuseThreshold, FMath::Max(NewValue, 0.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetIndirectDiffuseDarkColor(FLinearColor NewValue) { DTOON_SET(IndirectDiffuseDarkColor, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetIndirectDiffuseColor(FLinearColor NewValue) { DTOON_SET(IndirectDiffuseColor, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetIndirectDiffuseColorReplaceWeight(float NewValue) { DTOON_SET(IndirectDiffuseColorReplaceWeight, FMath::Clamp(NewValue, 0.0f, 1.0f), MarkRenderStateDirty()); }
 // [DeferredToon] Unified entry point; old setters below explicitly select compatibility mode.

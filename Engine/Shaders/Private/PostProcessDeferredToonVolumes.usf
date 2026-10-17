@@ -46,6 +46,9 @@ float OtherLightingWeight;
 Texture2D IndirectDiffuseTexture;
 uint bIndirectDiffuseAvailable;
 uint bOverrideIndirectDiffuse;
+uint IndirectDiffuseStyle;
+float IndirectDiffuseThreshold;
+float4 IndirectDiffuseDarkColor;
 float IndirectDiffuseIntensity;
 float4 IndirectDiffuseColor;
 float IndirectDiffuseColorReplaceWeight;
@@ -167,6 +170,38 @@ FDeferredToonOcclusion ResolveDeferredToonOcclusion(float4 Sky, float4 Lumen, bo
         Result.Source = 2;
     }
     return Result;
+}
+
+// [DeferredToon] Scene-linear indirect after the same AO controls used by composition.
+float3 ResolveDeferredToonAdjustedIndirect(float3 IndirectRGB, float3 ExtractedIndirect, FDeferredToonOcclusion Occlusion)
+{
+    float3 NativeIndirect = ExtractedIndirect * PrimaryView.OneOverPreExposure;
+    // [DeferredToon] Interpolate actual pre/post-AO lighting, never divide by visibility.
+    // Budget scale matches the existing residual extraction under fog/later composition.
+    const bool bAdjustSkyAO = bOverrideSkyOcclusion != 0u && Occlusion.Source == 2u;
+    const bool bAdjustLumenAO = bOverrideLumenShortRangeAO != 0u && Occlusion.Source == 1u;
+    if (bAdjustSkyAO || bAdjustLumenAO)
+    {
+        const float3 RawIndirect = max(IndirectRGB, 0.0f);
+        const float3 BudgetScale = float3(
+            RawIndirect.r > 1e-6f ? ExtractedIndirect.r / RawIndirect.r : 1.0f,
+            RawIndirect.g > 1e-6f ? ExtractedIndirect.g / RawIndirect.g : 1.0f,
+            RawIndirect.b > 1e-6f ? ExtractedIndirect.b / RawIndirect.b : 1.0f);
+        // [DeferredToon] Providers are mutually exclusive. Interpolate actual
+        // pre/post-AO diffuse, preserving colored multibounce and zero visibility.
+        const float3 BeforeAO = Occlusion.BeforeAO;
+        const float Strength = bAdjustLumenAO ? LumenShortRangeAOStrength : SkyOcclusionStrength;
+        NativeIndirect += (max(BeforeAO, 0.0f) - RawIndirect) * BudgetScale
+            * (1.0f - saturate(Strength)) * PrimaryView.OneOverPreExposure;
+        NativeIndirect = max(NativeIndirect, 0.0f);
+    }
+    return NativeIndirect;
+}
+
+float DeferredToonIndirectBand(float3 Indirect)
+{
+    const float Response = dot(max(Indirect, 0), float3(0.2126f, 0.7152f, 0.0722f));
+    return Response > 0.0f ? step(max(IndirectDiffuseThreshold, 0.0f), Response) : 0.0f;
 }
 
 float4 EvaluateDeferredToonInput(uint LayerIndex, float2 UV, FGBufferData GBufferData)
@@ -536,6 +571,15 @@ void MainPS(
         OutColor = float4((bValidIndirect ? 1.0f : 0.0f).xxx, 1.0f);
     }
     // [DeferredToon] Separate raw lighting, visibility and availability diagnostics.
+    else if (DebugView == 37)
+    {
+        const float3 Original = OriginalSceneColorTexture.SampleLevel(SceneColorSampler, UV, 0).rgb;
+        const float3 DebugResidual = max(Original - EffectiveLight.rgb * PrimaryView.PreExposure, 0.0f);
+        const float3 Extracted = min(max(IndirectSample.rgb, 0.0f), DebugResidual);
+        const float Band = bValidIndirect ? DeferredToonIndirectBand(
+            ResolveDeferredToonAdjustedIndirect(IndirectSample.rgb, Extracted, Occlusion)) : 0.0f;
+        OutColor = float4(Band.xxx * PrimaryView.PreExposure, 1);
+    }
     else if (DebugView == 33) // [DeferredToon] Unified raw provider diagnostics.
     {
         OutColor = float4(Occlusion.Visibility.xxx * PrimaryView.PreExposure, 1);
@@ -631,30 +675,18 @@ void MainPS(
                 // and other later passes may prevent an exact local decomposition.
                 // Neutral settings + Other=1 reproduce the old composite exactly.
                 const float3 ExtractedIndirect = min(max(IndirectSample.rgb, 0.0f), Residual);
-                float3 NativeIndirect = ExtractedIndirect * PrimaryView.OneOverPreExposure;
-                // [DeferredToon] Interpolate actual pre/post-AO lighting, never divide by visibility.
-                // Budget scale matches the existing residual extraction under fog/later composition.
+                const float3 NativeIndirect = ResolveDeferredToonAdjustedIndirect(IndirectSample.rgb, ExtractedIndirect, Occlusion);
                 const bool bAdjustSkyAO = bOverrideSkyOcclusion != 0u && Occlusion.Source == 2u;
-                const bool bAdjustLumenAO = bOverrideLumenShortRangeAO != 0u && Occlusion.Source == 1u;
-                if (bAdjustSkyAO || bAdjustLumenAO)
-                {
-                    const float3 RawIndirect = max(IndirectSample.rgb, 0.0f);
-                    const float3 BudgetScale = float3(
-                        RawIndirect.r > 1e-6f ? ExtractedIndirect.r / RawIndirect.r : 1.0f,
-                        RawIndirect.g > 1e-6f ? ExtractedIndirect.g / RawIndirect.g : 1.0f,
-                        RawIndirect.b > 1e-6f ? ExtractedIndirect.b / RawIndirect.b : 1.0f);
-                    // [DeferredToon] Providers are mutually exclusive. Interpolate actual
-                    // pre/post-AO diffuse, preserving colored multibounce and zero visibility.
-                    const float3 BeforeAO = Occlusion.BeforeAO;
-                    const float Strength = bAdjustLumenAO ? LumenShortRangeAOStrength : SkyOcclusionStrength;
-                    NativeIndirect += (max(BeforeAO, 0.0f) - RawIndirect) * BudgetScale
-                        * (1.0f - saturate(Strength)) * PrimaryView.OneOverPreExposure;
-                    NativeIndirect = max(NativeIndirect, 0.0f);
-                }
                 const float3 Tint = max(IndirectDiffuseColor.rgb, 0.0f);
                 float3 GradedIndirect = lerp(NativeIndirect * Tint, Tint * AuthoredBase,
                     saturate(IndirectDiffuseColorReplaceWeight)) * max(IndirectDiffuseIntensity, 0.0f) * PrimaryView.PreExposure;
-                if (bAdjustSkyAO)
+                if (IndirectDiffuseStyle == 1u && bOverrideIndirectDiffuse != 0u)
+                {
+                    // [DeferredToon] Fixed endpoints, no native brightness/chroma or material multiplication.
+                    GradedIndirect = lerp(max(IndirectDiffuseDarkColor.rgb, 0.0f), Tint,
+                        DeferredToonIndirectBand(NativeIndirect)) * max(IndirectDiffuseIntensity, 0.0f) * PrimaryView.PreExposure;
+                }
+                else if (bAdjustSkyAO)
                 {
                     // [DeferredToon] Apply color once to the occluded portion, after diffuse grading.
                     const float OccludedWeight = (1.0f - saturate(SkyBeforeAO.a)) * saturate(SkyOcclusionStrength)
