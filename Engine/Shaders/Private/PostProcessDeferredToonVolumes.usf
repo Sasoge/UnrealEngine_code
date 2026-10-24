@@ -42,6 +42,12 @@ float4 LightBandColors[8];
 float LitColorReplaceWeight;
 float ShadowColorReplaceWeight;
 float OtherLightingWeight;
+// [DeferredToon] Direct specular is already shadowed per light and pre-exposed.
+uint bSpecularAvailable;
+uint DirectSpecularStyle;
+float DirectSpecularThreshold;
+float4 DirectSpecularColor;
+float DirectSpecularIntensity;
 // [DeferredToon] RGB pre-exposed, A coverage; alpha is never exposure-scaled.
 Texture2D IndirectDiffuseTexture;
 uint bIndirectDiffuseAvailable;
@@ -237,6 +243,13 @@ float ResolveDeferredToonFinalAO(FDeferredToonOcclusion Occlusion)
     return lerp(1.0f, DeferredToonAOBand(Occlusion), saturate(Strength));
 }
 
+// [DeferredToon] Threshold only physical visible specular, before authored intensity.
+float DeferredToonSpecularMask(float3 VisibleSpecular)
+{
+    const float Response = dot(max(VisibleSpecular, 0.0f), float3(0.2126f, 0.7152f, 0.0722f));
+    return Response > 0.0f ? step(max(DirectSpecularThreshold, 0.0f), Response) : 0.0f;
+}
+
 float DeferredToonIndirectBand(float3 Indirect)
 {
     const float Response = dot(max(Indirect, 0), float3(0.2126f, 0.7152f, 0.0722f));
@@ -291,7 +304,7 @@ float4 EvaluateDeferredToonInput(uint LayerIndex, float2 UV, FGBufferData GBuffe
 	case 10u: // Velocity is encoded in the scene-texture uniform.
 		SourceValue = SceneTexturesStruct.GBufferVelocityTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
 		break;
-	case 11u: // SpecularDirectLight: unshadowed direct specular contribution.
+	case 11u: // SpecularDirectLight: visible direct specular contribution.
 		// [DeferredToon] Do not expose the packed facing value as specular alpha.
 		SourceValue = float4(SpecularBufferTexture.SampleLevel(SpecularBufferSampler, UV, 0).rgb, 0.0f);
 		break;
@@ -429,6 +442,10 @@ void MainPS(
 	const float4 EffectiveLight = max(EffectiveLightBufferTexture.SampleLevel(GlobalPointClampedSampler, UV, 0)
 		* PrimaryView.OneOverPreExposure, 0.0f);
     // [DeferredToon] Never feed indirect lighting back into direct band selection.
+    const float3 VisibleSpecular = bSpecularAvailable != 0u
+        ? max(SpecularBufferTexture.SampleLevel(SpecularBufferSampler, UV, 0).rgb * PrimaryView.OneOverPreExposure, 0.0f) : 0.0f;
+    const float SpecularMask = DeferredToonSpecularMask(VisibleSpecular);
+    const float3 StyledSpecular = max(DirectSpecularColor.rgb, 0.0f) * max(DirectSpecularIntensity, 0.0f) * SpecularMask * PrimaryView.PreExposure;
     const float4 IndirectSample = IndirectDiffuseTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
     const bool bValidIndirect = bIndirectDiffuseAvailable != 0u && IndirectSample.a > 0.5f;
     // [DeferredToon] -1 is invalid, while zero visibility is a valid fully occluded surface.
@@ -634,10 +651,23 @@ void MainPS(
         }
         OutColor = float4(Display * PrimaryView.PreExposure, 1);
     }
+    else if (DebugView == 39) // [DeferredToon] Independent of color/intensity and mode selection.
+    {
+        OutColor = float4(SpecularMask.xxx * PrimaryView.PreExposure, 1);
+    }
+    else if (DebugView == 40)
+    {
+        OutColor = float4(DirectSpecularStyle == 1u ? StyledSpecular : VisibleSpecular * PrimaryView.PreExposure, 1);
+    }
     else if (DebugView == 37)
     {
         const float3 Original = OriginalSceneColorTexture.SampleLevel(SceneColorSampler, UV, 0).rgb;
-        const float3 DebugResidual = max(Original - EffectiveLight.rgb * PrimaryView.PreExposure, 0.0f);
+        float3 DebugResidual = max(Original - EffectiveLight.rgb * PrimaryView.PreExposure, 0.0f);
+        // [DeferredToon] Match the production residual budget when highlights are extracted.
+        if (DirectSpecularStyle == 1u && bSpecularAvailable != 0u)
+        {
+            DebugResidual -= min(VisibleSpecular * PrimaryView.PreExposure, DebugResidual);
+        }
         const float3 Extracted = min(max(IndirectSample.rgb, 0.0f), DebugResidual);
         const float Band = bValidIndirect ? DeferredToonIndirectBand(
             ResolveDeferredToonIndirectForGrading(IndirectSample.rgb, Extracted, Occlusion)) : 0.0f;
@@ -730,7 +760,12 @@ void MainPS(
             const float3 BandReplacementColor = MappedBandColor * AuthoredBase;
             const float3 GradedDirect = lerp(BandTintedColor, BandReplacementColor, saturate(MappedBandColorWeight)) * PrimaryView.PreExposure;
             const float3 OriginalColor = Texture2DSampleLevel(OriginalSceneColorTexture, SceneColorSampler, UV, 0).rgb;
-            const float3 Residual = max(OriginalColor - EffectiveLight.rgb * PrimaryView.PreExposure, 0.0f);
+            const float3 OriginalResidual = max(OriginalColor - EffectiveLight.rgb * PrimaryView.PreExposure, 0.0f);
+            // [DeferredToon] Remove direct specular once, before allocating the indirect
+            // budget. Native opt-out preserves the old residual path exactly.
+            const bool bStyleSpecular = DirectSpecularStyle == 1u && bSpecularAvailable != 0u;
+            const float3 ExtractedSpecular = bStyleSpecular ? min(VisibleSpecular * PrimaryView.PreExposure, OriginalResidual) : 0.0f;
+            const float3 Residual = OriginalResidual - ExtractedSpecular;
             float3 OtherContribution = Residual * saturate(OtherLightingWeight);
             if (bValidIndirect && (bOverrideIndirectDiffuse != 0u || (bUnifiedIndirectOcclusion != 0u && Occlusion.Source != 0u)))
             {
@@ -769,7 +804,7 @@ void MainPS(
                 GradedIndirect *= ResolveDeferredToonFinalAO(Occlusion);
                 OtherContribution = GradedIndirect + (Residual - ExtractedIndirect) * saturate(OtherLightingWeight);
             }
-            OutputColor = lerp(SceneColor.rgb, GradedDirect + OtherContribution, Weight);
+            OutputColor = lerp(SceneColor.rgb, GradedDirect + OtherContribution + (bStyleSpecular ? StyledSpecular : 0.0f), Weight);
         }
 		OutColor = float4(OutputColor, SceneColor.a);
 	}

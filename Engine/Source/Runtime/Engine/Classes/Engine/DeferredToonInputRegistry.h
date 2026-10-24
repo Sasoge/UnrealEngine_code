@@ -19,7 +19,7 @@ enum class EDeferredToonInputId : uint16
 	ShadingModel = 8,
 	Depth = 9,
 	Velocity = 10,
-	// [DeferredToon] Unshadowed direct specular contribution from the split MRT.
+	// [DeferredToon] Visible direct specular after per-light shadows/channels/attenuation, from the split MRT.
 	SpecularDirectLight = 11,
 	// [DeferredToon] Dimensionless max positive N.L, physically packed in specular alpha.
 	DirectLightFacing = 12,

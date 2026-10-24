@@ -484,7 +484,7 @@ void DeferredLightPixelMain(
 				// Shadow Channel mask; direct lighting only occupies RGB.
 				// [DeferredToon] Substrate already exposes diffuse/specular split totals.
 				LightingContribution += float4(LightingBufferSubstrateLighting.TotalDiffuseLighting, 0.0f);
-				SpecularContribution += float4(LightingBufferSubstrateLighting.TotalSpecularLighting, 0.0f);
+				// [DeferredToon] Specular RGB is exported from the visible native result below.
 				// [DeferredToon] Use the Substrate top-layer normal, not a BRDF result.
 				SpecularContribution.a = GetDeferredToonFacing(
 					SubstrateUnpackTopLayerData(SubstratePixelHeader.PackedTopLayerData).WorldNormal,
@@ -570,6 +570,8 @@ void DeferredLightPixelMain(
                     DerivedParams.CameraVector, ReferenceSurface, LightData,
                     SubstrateShadowTermInputParameters.LightAttenuation, SubstrateShadowTermInputParameters.Dither, uint2(PixelPos));
                 EffectiveLightContribution = float4(SubstrateLighting.TotalDiffuseLighting, Luminance(ReferenceResponse));
+                // [DeferredToon] Shadow/channel/attenuation are applied per light before accumulation.
+                SpecularContribution.rgb += SubstrateLighting.TotalSpecularLighting;
             }
         #endif
 		// [ShadowChannelPrototype] Apply the direct fallback subtraction only when
@@ -728,7 +730,7 @@ void DeferredLightPixelMain(
 		{
 			// [LightingShadowBuffer] Reserve alpha for the Shadow Channel mask.
 			LightingContribution += float4(UnshadowedLighting.DiffuseLighting.rgb, 0.0f);
-			SpecularContribution += float4(UnshadowedLighting.SpecularLighting.rgb, 0.0f);
+			// [DeferredToon] Keep only the facing diagnostic here; export visible specular below.
 			// [DeferredToon] Preserve pure surface orientation alongside specular RGB.
 			SpecularContribution.a = GetDeferredToonFacing(
 				ScreenSpaceData.GBuffer.WorldNormal, ShadowLightDirection, ShadowLightMask, bLightingChannelMatch);
@@ -790,6 +792,8 @@ void DeferredLightPixelMain(
                 DerivedParams.CameraVector, ScreenSpaceData.GBuffer, LightData,
                 LightAttenuationForComposite, Dither, uint2(InputParams.PixelPos));
             EffectiveLightContribution = float4(VisibleLighting.DiffuseLighting.rgb, Luminance(ReferenceResponse));
+            // [DeferredToon] Export the exact native visible specular, not an aggregate shadow approximation.
+            SpecularContribution.rgb += VisibleLighting.SpecularLighting.rgb;
         }
     #endif
 		OutColor += Radiance;
@@ -822,6 +826,10 @@ void DeferredLightPixelMain(
 			// float ToonDistance = length(Pivot - DerivedParams.TranslatedWorldPosition) / 200.0f;
 			// Radiance = float4(ToonDistance.xxx, 1.0f);
 			OutColor = 0.0f;
+#if LIGHTING_SHADOW_BUFFER_OUTPUT
+            // [DeferredToon] This custom Toon main-light branch removes native radiance.
+            SpecularContribution.rgb = 0.0f;
+#endif
 		}
 		// Toon Shadow
 		float HairShadow = 1;
@@ -1116,7 +1124,7 @@ void DeferredLightPixelMain(
             Luminance(ReferenceResponse)) * GetExposure();
     }
 	LightingContribution = float4(AtmosphericTransmittance * UnshadowedHairLighting.DiffuseLighting.rgb * HairLightingScale * GetExposure(), 0.0f);
-	SpecularContribution = float4(AtmosphericTransmittance * UnshadowedHairLighting.SpecularLighting.rgb * HairLightingScale * GetExposure(), 0.0f);
+	SpecularContribution = float4(AtmosphericTransmittance * VisibleHairLighting.SpecularLighting.rgb * HairLightingScale * GetExposure(), 0.0f);
 	// [DeferredToon] Keep the packed semantic initialized in hair permutations too.
 	SpecularContribution.a = GetDeferredToonFacing(
 		HairScreenSpaceData.GBuffer.WorldNormal, HairLightDirection, HairLightMask, bHairLightingChannelMatch);

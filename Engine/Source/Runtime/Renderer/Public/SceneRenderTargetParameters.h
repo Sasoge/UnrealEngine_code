@@ -25,7 +25,7 @@ enum class ESceneTexture
 	// [LightingShadowBuffer] Deferred-only separated direct-light and shadow contributions.
 	LightingBuffer,
 	ShadowBuffer,
-	// [DeferredToon] Separate unshadowed direct specular contribution.
+	// [DeferredToon] Separate visible direct specular contribution.
 	SpecularBuffer,
 	// [DeferredToon] Shadowed diffuse and material-independent selection input.
 	EffectiveLightBuffer,

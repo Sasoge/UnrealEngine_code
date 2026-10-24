@@ -159,7 +159,7 @@ struct FSceneTextures : public FMinimalSceneTextures
 	// [LightingShadowBuffer] Deferred-only MRTs for unshadowed direct lighting and positive shadow contribution.
 	FRDGTextureRef LightingBuffer{};
 	FRDGTextureRef ShadowBuffer{};
-	// [DeferredToon] Deferred-only MRT for unshadowed direct specular lighting.
+	// [DeferredToon] Deferred-only MRT for visible direct specular lighting.
 	FRDGTextureRef SpecularBuffer{};
 	// [DeferredToon] RGB: visible native diffuse; A: visible unit-white diffuse response.
 	FRDGTextureRef EffectiveLightBuffer{};

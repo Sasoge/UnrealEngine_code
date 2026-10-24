@@ -80,6 +80,11 @@ void Apply(bool bChinese)
         {TEXT("OutputMode"), TEXT("输出模式"), TEXT("直接光调色：处理原生有效直接漫反射；独立重组：输出色板与可选材质底色。整体染色与输入层预览用于辅助调试。")},
         {TEXT("BlendWeight"), TEXT("效果强度"), TEXT("0 保留原画面；1 在盒体内部完整应用效果。")},
         // [DeferredToon] Keep new authoring controls bilingual.
+        // [DeferredToon] Compact direct-highlight controls.
+        {TEXT("DirectSpecularStyle"), TEXT("高光方式"), TEXT("原生：高光沿用保留其他光照。硬边单档：独立替换实际直接光高光，使用 UE 的阴影、衰减与通道结果。不包含环境反射或 Lumen 反射。")},
+        {TEXT("DirectSpecularThreshold"), TEXT("高光范围阈值"), TEXT("对去预曝光后的实际直接光高光亮度做硬阈值判断。越高范围越小；零光照不会产生高光。不是归一化值，粗糙度、法线、视角及光源仍决定形状。视图 39 查看遮罩。")},
+        {TEXT("DirectSpecularColor"), TEXT("高光颜色"), TEXT("硬边区域内的固定线性颜色，不再乘材质底色或原生灯光颜色。最终仍经过 UE 曝光与色调映射。")},
+        {TEXT("DirectSpecularIntensity"), TEXT("高光强度"), TEXT("只缩放高光颜色，不改变选区。0 移除已分离的原生直接高光。硬边模式下该层独立于保留其他光照。")},
         {TEXT("bOverrideIndirectDiffuse"), TEXT("独立调整间接漫反射"), TEXT("从其他光照中分出支持的 Lumen 或动态天光漫反射。不改变直接光档位；不支持的像素沿用原合成。")},
         {TEXT("IndirectDiffuseIntensity"), TEXT("强度"), TEXT("1 保留原始强度；0 去除已分离的间接漫反射。")},
         {TEXT("IndirectDiffuseColor"), TEXT("颜色 / 亮部颜色"), TEXT("严格二分时为固定亮色；原有调色时为线性空间乘色或替换色。颜色替换为 0 时白色为中性；最后仍经过 UE 曝光和色调映射。")},
@@ -97,7 +102,7 @@ void Apply(bool bChinese)
         {TEXT("SkyOcclusionStrength"), TEXT("遮蔽强度"), TEXT("1 保留原生遮蔽；0 恢复局部 AO、弯曲法线和遮蔽染色应用前的天光漫反射。保留云遮蔽，不改变直接光阴影。")},
         {TEXT("SkyOcclusionColor"), TEXT("遮蔽颜色"), TEXT("遮蔽区域的线性替换色，只改变间接漫反射，不给直接光和反射染色。最终仍经过曝光与色调映射。")},
         {TEXT("SkyOcclusionColorReplaceWeight"), TEXT("颜色替换"), TEXT("0 保留间接光调色结果；1 按原生综合遮蔽程度和遮蔽强度混入遮蔽颜色。无遮挡处不变。")},
-        {TEXT("OtherLightingWeight"), TEXT("保留其他光照"), TEXT("0 只输出处理后的直接漫反射；1 保留原画面减去直接漫反射后的其余贡献，包括间接光与高光。启用独立调整间接漫反射后，已分离部分改由间接光参数控制。这会影响最终看到的色板颜色。")},
+        {TEXT("OtherLightingWeight"), TEXT("保留其他光照"), TEXT("0 只输出处理后的直接漫反射；1 保留原画面减去直接漫反射后的其余贡献，包括间接光与高光。启用独立调整间接漫反射后，已分离部分改由间接光参数控制。硬边直接高光也由独立参数控制。这会影响最终看到的色板颜色。")},
         {TEXT("bUseLightBands"), TEXT("启用多档明暗"), TEXT("支持 2～8 档。关闭或不足两档时使用二分阈值。")},
         {TEXT("EffectiveLightThreshold"), TEXT("二分受光阈值"), TEXT("二分模式的受光分界。多档模式使用每档受光下限；调试视图 14、19、20 仍使用这个二分参考阈值。")},
         {TEXT("LightBands"), TEXT("明暗档位"), TEXT("前 8 项按受光下限排序；下限相同则后项优先。至少两项。数组标题为“受光下限 / 档位值”。")},
@@ -172,6 +177,12 @@ void Apply(bool bChinese)
         {TEXT("HardTwoTone"), TEXT("遮蔽二分（自动来源）")},
     };
     TranslateEnum(TEXT("/Script/Engine.EDeferredToonIndirectOcclusionMode"), OcclusionModes, bChinese);
+    // [DeferredToon] Enum labels use the same editor-only language toggle.
+    const FEnumText SpecularStyles[] = {
+        {TEXT("Native"), TEXT("原生")},
+        {TEXT("HardSingleBand"), TEXT("硬边单档")},
+    };
+    TranslateEnum(TEXT("/Script/Engine.EDeferredToonDirectSpecularStyle"), SpecularStyles, bChinese);
     const FEnumText Enum1[] = {
         {TEXT("NativeComposite"), TEXT("0 - 当前输出")},
         {TEXT("BoxInfluence"), TEXT("1 - 盒体影响范围")},
@@ -189,7 +200,7 @@ void Apply(bool bChinese)
         {TEXT("Velocity"), TEXT("13 - 运动速度")},
         {TEXT("DirectLightMask"), TEXT("14 - 直接光遮罩")},
         {TEXT("CombinedShadowMask"), TEXT("17 - 组合阴影遮罩")},
-        {TEXT("SpecularDirectLight"), TEXT("18 - 直接光高光")},
+        {TEXT("SpecularDirectLight"), TEXT("18 - 有效直接光高光")},
         {TEXT("ToonShadowMask"), TEXT("19 - 卡通阴影遮罩")},
         {TEXT("ToonBinaryShadowMask"), TEXT("20 - 卡通二分阴影遮罩")},
         {TEXT("DirectLightFacing"), TEXT("21 - 朝向受光（N·L）")},
@@ -210,6 +221,8 @@ void Apply(bool bChinese)
         {TEXT("IndirectOcclusionSource"), TEXT("36 - 遮蔽来源（青=Lumen，橙=天光，黑=无）")},
         {TEXT("IndirectDiffuseBand"), TEXT("37 - 间接漫反射二分遮罩")},
         {TEXT("IndirectOcclusionBand"), TEXT("38 - 遮蔽二分遮罩（白为无遮挡）")},
+        {TEXT("DirectSpecularMask"), TEXT("39 - 直接高光硬边遮罩")},
+        {TEXT("StyledDirectSpecular"), TEXT("40 - 风格化直接光高光")},
         {TEXT("ConsoleGlobal"), TEXT("跟随全局 / 控制台")},
     };
     TranslateEnum(TEXT("/Script/Engine.EDeferredToonDebugView"), Enum1, bChinese);

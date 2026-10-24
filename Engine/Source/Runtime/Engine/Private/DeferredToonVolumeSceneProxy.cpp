@@ -34,6 +34,10 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     ShadowColorReplaceWeight = Component->ShadowColorReplaceWeight;
     OtherLightingWeight = Component->OtherLightingWeight;
     // [DeferredToon] Sanitize numeric limits at the render boundary as well as in UI.
+    DirectSpecularStyle = static_cast<uint8>(Component->DirectSpecularStyle); // [DeferredToon]
+    DirectSpecularThreshold = FMath::IsFinite(Component->DirectSpecularThreshold) ? FMath::Max(Component->DirectSpecularThreshold, 0.0f) : 0.1f;
+    DirectSpecularColor = Component->DirectSpecularColor;
+    DirectSpecularIntensity = FMath::IsFinite(Component->DirectSpecularIntensity) ? FMath::Max(Component->DirectSpecularIntensity, 0.0f) : 1.0f;
     bOverrideIndirectDiffuse = Component->bOverrideIndirectDiffuse;
     IndirectDiffuseStyle = static_cast<uint8>(Component->IndirectDiffuseStyle);
     IndirectDiffuseThreshold = FMath::Max(Component->IndirectDiffuseThreshold, 0.0f);

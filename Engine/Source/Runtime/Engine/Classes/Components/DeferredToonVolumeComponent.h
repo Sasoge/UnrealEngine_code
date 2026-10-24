@@ -55,6 +55,14 @@ enum class EDeferredToonIndirectDiffuseStyle : uint8
     TwoTone = 1 UMETA(DisplayName="Hard Two-Tone"),
 };
 
+// [DeferredToon] One fixed highlight band, with native opt-out for saved assets.
+UENUM(BlueprintType)
+enum class EDeferredToonDirectSpecularStyle : uint8
+{
+    Native = 0 UMETA(DisplayName="Native"),
+    HardSingleBand = 1 UMETA(DisplayName="Hard Single Band"),
+};
+
 // [DeferredToon] Explicit compatibility mode avoids merging unequal saved settings.
 UENUM(BlueprintType)
 enum class EDeferredToonIndirectOcclusionMode : uint8
@@ -89,7 +97,7 @@ enum class EDeferredToonDebugView : uint8
     NativeShadowMask = 15 UMETA(Hidden),
     ShadowChannelMask = 16 UMETA(Hidden),
     CombinedShadowMask = 17 UMETA(DisplayName="17 - Combined Shadow Mask"),
-    SpecularDirectLight = 18 UMETA(DisplayName="18 - Specular Direct Light"),
+    SpecularDirectLight = 18 UMETA(DisplayName="18 - Effective Direct Specular"),
     ToonShadowMask = 19 UMETA(DisplayName="19 - Toon Shadow Mask"),
     // [DeferredToon] Strict effective-light selection plus artistic shadow override.
     ToonBinaryShadowMask = 20 UMETA(DisplayName="20 - Toon Binary Shadow Mask"),
@@ -117,6 +125,9 @@ enum class EDeferredToonDebugView : uint8
     IndirectOcclusionSource = 36 UMETA(DisplayName="36 - AO Source (Cyan=Lumen, Orange=Sky, Black=None)"),
     IndirectDiffuseBand = 37 UMETA(DisplayName="37 - Indirect Diffuse Two-Tone Mask"),
     IndirectOcclusionBand = 38 UMETA(DisplayName="38 - AO Two-Tone Mask (White = Unoccluded)"),
+    // [DeferredToon] Append diagnostics without changing existing IDs.
+    DirectSpecularMask = 39 UMETA(DisplayName="39 - Direct Specular Hard Mask"),
+    StyledDirectSpecular = 40 UMETA(DisplayName="40 - Styled Direct Specular"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 
@@ -200,8 +211,21 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Palette", meta=(ClampMin="0.0", ClampMax="1.0", EditConditionHides, DisplayName="Shadow Color Replacement", DisplayPriority="4", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", ToolTip="0 tints original direct diffuse; 1 replaces it with the target color, even in fully dark regions. Intermediate bands interpolate the shadow/light replacement amounts by their Level."))
     float ShadowColorReplaceWeight = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Output", meta=(ClampMin="0.0", ClampMax="1.0", EditConditionHides, DisplayName="Keep Other Lighting", DisplayPriority="3", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", ToolTip="0 keeps only processed direct diffuse; 1 also retains the original scene residual (including indirect light and specular). With Adjust Indirect Diffuse enabled, extracted indirect has separate controls. This can change the visible palette colors."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Output", meta=(ClampMin="0.0", ClampMax="1.0", EditConditionHides, DisplayName="Keep Other Lighting", DisplayPriority="3", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", ToolTip="0 keeps only processed direct diffuse; 1 also retains the original scene residual (including indirect light and specular). With Adjust Indirect Diffuse enabled, extracted indirect has separate controls. Hard Single Band direct specular also uses its independent intensity. This can change the visible palette colors."))
     float OtherLightingWeight = 1.0f;
+
+    // [DeferredToon] Native is opt-out: existing assets retain the original residual.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Specular", meta=(DisplayName="Highlight Style", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Native preserves existing direct specular in Other Lighting. Hard Single Band replaces only the visible direct-specular contribution with a fixed color inside its mask. Environment/Lumen reflections are separate."))
+    EDeferredToonDirectSpecularStyle DirectSpecularStyle = EDeferredToonDirectSpecularStyle::Native;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Specular", meta=(DisplayName="Highlight Threshold", ClampMin="0.0", UIMax="1.0", EditCondition="DirectSpecularStyle == EDeferredToonDirectSpecularStyle::HardSingleBand && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Hard threshold of scene-linear native visible specular luminance. Higher values shrink the highlight; zero light never creates a highlight. Not normalized. Material roughness, normals, camera and lights still determine its shape. View 39 previews the mask."))
+    float DirectSpecularThreshold = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Specular", meta=(DisplayName="Highlight Color", HideAlphaChannel, EditCondition="DirectSpecularStyle == EDeferredToonDirectSpecularStyle::HardSingleBand && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Fixed scene-linear highlight color. Does not multiply BaseColor or native light color again. UE exposure and tonemapping still apply."))
+    FLinearColor DirectSpecularColor = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Specular", meta=(DisplayName="Highlight Intensity", ClampMin="0.0", UIMax="4.0", EditCondition="DirectSpecularStyle == EDeferredToonDirectSpecularStyle::HardSingleBand && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Scales the fixed highlight color without changing its mask. Zero removes the extracted native direct specular. In hard-band mode this layer is independent of Keep Other Lighting."))
+    float DirectSpecularIntensity = 1.0f;
 
     // [DeferredToon] Opt-in split preserves legacy residual weights in existing assets.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Indirect", meta=(DisplayName="Adjust Indirect Diffuse", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Extract supported Lumen or dynamic sky diffuse from Other Lighting and control it independently. Does not change direct-light bands. Unsupported pixels retain the old composition."))
@@ -322,6 +346,11 @@ public:
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetShadowColorReplaceWeight(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOtherLightingWeight(float NewValue);
     // [DeferredToon] Runtime setters invalidate the render-thread snapshot.
+    // [DeferredToon] Runtime changes refresh the immutable render-thread snapshot.
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectSpecularStyle(EDeferredToonDirectSpecularStyle NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectSpecularThreshold(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectSpecularColor(FLinearColor NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectSpecularIntensity(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOverrideIndirectDiffuse(bool NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseIntensity(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseStyle(EDeferredToonIndirectDiffuseStyle NewValue);

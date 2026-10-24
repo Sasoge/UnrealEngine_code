@@ -36,7 +36,7 @@ namespace
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
 		// [DeferredToon] View 20 previews the new independent two-band output mask.
-		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light), 25 indirect diffuse (Lumen or dynamic sky), 26 indirect availability, 27 sky diffuse before AO, 28 sky combined AO (white=unoccluded), 29 sky split availability, 30 Lumen short AO, 31 Lumen diffuse before short AO, 32 Lumen short AO availability, 33 auto AO, 34 auto diffuse before AO, 35 auto availability, 36 provider (cyan=Lumen/orange=sky/black=none), 37 indirect two-tone mask, 38 AO two-tone mask (white=unoccluded)."),
+		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light), 25 indirect diffuse (Lumen or dynamic sky), 26 indirect availability, 27 sky diffuse before AO, 28 sky combined AO (white=unoccluded), 29 sky split availability, 30 Lumen short AO, 31 Lumen diffuse before short AO, 32 Lumen short AO availability, 33 auto AO, 34 auto diffuse before AO, 35 auto availability, 36 provider (cyan=Lumen/orange=sky/black=none), 37 indirect two-tone mask, 38 AO two-tone mask (white=unoccluded), 39 direct specular hard mask, 40 styled direct specular. 18 shows effective shadowed direct specular."),
 		ECVF_RenderThreadSafe);
 
     TAutoConsoleVariable<int32> CVarDeferredToonAOCleanup(
@@ -300,6 +300,12 @@ namespace
 			// [DeferredToon] Explicit optional provider; no global scene uniform ABI change.
 			SHADER_PARAMETER_RDG_TEXTURE(Texture2D, IndirectDiffuseTexture)
 			SHADER_PARAMETER(uint32, bIndirectDiffuseAvailable)
+            // [DeferredToon] Visible direct-specular band controls.
+            SHADER_PARAMETER(uint32, bSpecularAvailable)
+            SHADER_PARAMETER(uint32, DirectSpecularStyle)
+            SHADER_PARAMETER(float, DirectSpecularThreshold)
+            SHADER_PARAMETER(FVector4f, DirectSpecularColor)
+            SHADER_PARAMETER(float, DirectSpecularIntensity)
 			SHADER_PARAMETER(uint32, bOverrideIndirectDiffuse)
 			SHADER_PARAMETER(uint32, IndirectDiffuseStyle)
             SHADER_PARAMETER(float, IndirectDiffuseThreshold)
@@ -394,7 +400,7 @@ namespace
 		// control.  255 preserves the legacy global console variable path.
 		const uint32 DebugView = Volume.DebugView == 255u
 			? uint32(GetDeferredToonVolumeDebugView())
-			: FMath::Min<uint32>(Volume.DebugView, 38u); // [DeferredToon] Band preview appended; existing IDs preserved.
+			: FMath::Min<uint32>(Volume.DebugView, 40u); // [DeferredToon] Band preview appended; existing IDs preserved.
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial
@@ -463,6 +469,12 @@ namespace
         const FRDGTextureRef IndirectTexture = View.GetSceneTextures().ToonIndirectDiffuse;
         PassParameters->bIndirectDiffuseAvailable = IndirectTexture && HasBeenProduced(IndirectTexture) ? 1u : 0u;
         PassParameters->IndirectDiffuseTexture = PassParameters->bIndirectDiffuseAvailable ? IndirectTexture : GSystemTextures.GetBlackDummy(GraphBuilder);
+        // [DeferredToon] Missing exports retain the native residual, never synthesize a band.
+        PassParameters->bSpecularAvailable = View.GetSceneTextures().SpecularBuffer && HasBeenProduced(View.GetSceneTextures().SpecularBuffer) ? 1u : 0u;
+        PassParameters->DirectSpecularStyle = Volume.DirectSpecularStyle;
+        PassParameters->DirectSpecularThreshold = Volume.DirectSpecularThreshold;
+        PassParameters->DirectSpecularColor = FVector4f(Volume.DirectSpecularColor);
+        PassParameters->DirectSpecularIntensity = Volume.DirectSpecularIntensity;
         PassParameters->bOverrideIndirectDiffuse = Volume.bOverrideIndirectDiffuse ? 1u : 0u;
         PassParameters->IndirectDiffuseIntensity = Volume.IndirectDiffuseIntensity;
         PassParameters->IndirectDiffuseColor = FVector4f(Volume.IndirectDiffuseColor.R, Volume.IndirectDiffuseColor.G, Volume.IndirectDiffuseColor.B, 1);
@@ -529,7 +541,7 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 38); // [DeferredToon] Appended indirect diffuse diagnostics.
+	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 40); // [DeferredToon] Appended indirect diffuse diagnostics.
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(

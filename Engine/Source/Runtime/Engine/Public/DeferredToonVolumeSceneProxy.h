@@ -55,6 +55,11 @@ public:
     float LitColorReplaceWeight = 0.0f;
     float ShadowColorReplaceWeight = 1.0f;
     float OtherLightingWeight = 1.0f;
+    // [DeferredToon] Independent direct-specular band; no new render target.
+    uint8 DirectSpecularStyle = 0;
+    float DirectSpecularThreshold = 0.1f;
+    FLinearColor DirectSpecularColor = FLinearColor::White;
+    float DirectSpecularIntensity = 1.0f;
     // [DeferredToon] Optional independent indirect diffuse grade.
     bool bOverrideIndirectDiffuse = false;
     uint8 IndirectDiffuseStyle = 0;
