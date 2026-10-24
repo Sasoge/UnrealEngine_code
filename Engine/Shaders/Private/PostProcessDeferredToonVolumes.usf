@@ -46,6 +46,7 @@ float OtherLightingWeight;
 uint bSpecularAvailable;
 uint DirectSpecularStyle;
 float DirectSpecularThreshold;
+uint DirectSpecularColorMode;
 float4 DirectSpecularColor;
 float DirectSpecularIntensity;
 // [DeferredToon] RGB pre-exposed, A coverage; alpha is never exposure-scaled.
@@ -250,6 +251,21 @@ float DeferredToonSpecularMask(float3 VisibleSpecular)
     return Response > 0.0f ? step(max(DirectSpecularThreshold, 0.0f), Response) : 0.0f;
 }
 
+// [DeferredToon] Preserve effective material/light RGB ratios, quantize energy only.
+// Never multiply BaseColor/F0/light color again: the native provider includes them.
+float3 DeferredToonSpecularColor(float3 VisibleSpecular)
+{
+    const float3 Tint = max(DirectSpecularColor.rgb, 0.0f);
+    if (DirectSpecularColorMode == 1u)
+    {
+        return Tint; // Explicit legacy fixed-color replacement.
+    }
+    const float3 PositiveSpecular = max(VisibleSpecular, 0.0f);
+    const float Response = dot(PositiveSpecular, float3(0.2126f, 0.7152f, 0.0722f));
+    // Keep HDR chroma: saturating individual channels would change colored F0/light.
+    return PositiveSpecular / max(Response, 1.0e-6f) * Tint;
+}
+
 float DeferredToonIndirectBand(float3 Indirect)
 {
     const float Response = dot(max(Indirect, 0), float3(0.2126f, 0.7152f, 0.0722f));
@@ -445,7 +461,7 @@ void MainPS(
     const float3 VisibleSpecular = bSpecularAvailable != 0u
         ? max(SpecularBufferTexture.SampleLevel(SpecularBufferSampler, UV, 0).rgb * PrimaryView.OneOverPreExposure, 0.0f) : 0.0f;
     const float SpecularMask = DeferredToonSpecularMask(VisibleSpecular);
-    const float3 StyledSpecular = max(DirectSpecularColor.rgb, 0.0f) * max(DirectSpecularIntensity, 0.0f) * SpecularMask * PrimaryView.PreExposure;
+    const float3 StyledSpecular = DeferredToonSpecularColor(VisibleSpecular) * max(DirectSpecularIntensity, 0.0f) * SpecularMask * PrimaryView.PreExposure;
     const float4 IndirectSample = IndirectDiffuseTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
     const bool bValidIndirect = bIndirectDiffuseAvailable != 0u && IndirectSample.a > 0.5f;
     // [DeferredToon] -1 is invalid, while zero visibility is a valid fully occluded surface.

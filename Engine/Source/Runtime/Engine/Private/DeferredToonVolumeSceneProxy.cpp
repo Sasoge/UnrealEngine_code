@@ -36,6 +36,7 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     // [DeferredToon] Sanitize numeric limits at the render boundary as well as in UI.
     DirectSpecularStyle = static_cast<uint8>(Component->DirectSpecularStyle); // [DeferredToon]
     DirectSpecularThreshold = FMath::IsFinite(Component->DirectSpecularThreshold) ? FMath::Max(Component->DirectSpecularThreshold, 0.0f) : 0.1f;
+    DirectSpecularColorMode = static_cast<uint8>(Component->DirectSpecularColorMode);
     DirectSpecularColor = Component->DirectSpecularColor;
     DirectSpecularIntensity = FMath::IsFinite(Component->DirectSpecularIntensity) ? FMath::Max(Component->DirectSpecularIntensity, 0.0f) : 1.0f;
     bOverrideIndirectDiffuse = Component->bOverrideIndirectDiffuse;

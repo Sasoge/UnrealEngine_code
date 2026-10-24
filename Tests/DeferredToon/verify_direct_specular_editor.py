@@ -29,7 +29,8 @@ point.set_light_color(unreal.LinearColor(1,1,1,1))
 point.set_editor_property('use_inverse_squared_falloff', False)
 point.set_attenuation_radius(1500)
 point_actor.set_actor_location(target+unreal.Vector(200,-150,250),False,False)
-for cmd in ['r.AntiAliasingMethod 0', 'r.ScreenPercentage 100', 'ShowFlag.Tonemapper 0',
+# Debug views bypass final output gamma; make production captures linear too.
+for cmd in ['gamma 1', 'r.AntiAliasingMethod 0', 'r.ScreenPercentage 100', 'ShowFlag.Tonemapper 0',
             'ShowFlag.Bloom 0', 'ShowFlag.MotionBlur 0', 'r.SSR.Quality 0']:
     command(cmd)
 materials = []
@@ -73,6 +74,7 @@ material(0)
 apply('set_indirect_occlusion_mode',unreal.DeferredToonIndirectOcclusionMode.NATIVE)
 apply('set_override_indirect_diffuse',False)
 style(Style.NATIVE)
+apply('set_direct_specular_color_mode',unreal.DeferredToonDirectSpecularColorMode.FIXED_COLOR)
 point.set_visibility(False)
 phases = [
     ('baseline', [lambda:apply('set_enabled',False),lambda:d(0)]),

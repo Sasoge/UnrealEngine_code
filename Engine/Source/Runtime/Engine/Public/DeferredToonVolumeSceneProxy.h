@@ -58,6 +58,7 @@ public:
     // [DeferredToon] Independent direct-specular band; no new render target.
     uint8 DirectSpecularStyle = 0;
     float DirectSpecularThreshold = 0.1f;
+    uint8 DirectSpecularColorMode = 0;
     FLinearColor DirectSpecularColor = FLinearColor::White;
     float DirectSpecularIntensity = 1.0f;
     // [DeferredToon] Optional independent indirect diffuse grade.

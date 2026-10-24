@@ -304,6 +304,7 @@ namespace
             SHADER_PARAMETER(uint32, bSpecularAvailable)
             SHADER_PARAMETER(uint32, DirectSpecularStyle)
             SHADER_PARAMETER(float, DirectSpecularThreshold)
+            SHADER_PARAMETER(uint32, DirectSpecularColorMode)
             SHADER_PARAMETER(FVector4f, DirectSpecularColor)
             SHADER_PARAMETER(float, DirectSpecularIntensity)
 			SHADER_PARAMETER(uint32, bOverrideIndirectDiffuse)
@@ -473,6 +474,7 @@ namespace
         PassParameters->bSpecularAvailable = View.GetSceneTextures().SpecularBuffer && HasBeenProduced(View.GetSceneTextures().SpecularBuffer) ? 1u : 0u;
         PassParameters->DirectSpecularStyle = Volume.DirectSpecularStyle;
         PassParameters->DirectSpecularThreshold = Volume.DirectSpecularThreshold;
+        PassParameters->DirectSpecularColorMode = Volume.DirectSpecularColorMode;
         PassParameters->DirectSpecularColor = FVector4f(Volume.DirectSpecularColor);
         PassParameters->DirectSpecularIntensity = Volume.DirectSpecularIntensity;
         PassParameters->bOverrideIndirectDiffuse = Volume.bOverrideIndirectDiffuse ? 1u : 0u;

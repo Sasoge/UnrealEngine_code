@@ -7,7 +7,7 @@ from PIL import Image
 root = Path(sys.argv[1])
 def read(name): return np.asarray(Image.open(root/(name+'.png')).convert('RGB'),dtype=np.float32)
 def linear(image):
-    # This fixture disables the tonemapper; HighResShot stores linear UNORM RGB.
+    # This fixture disables the tonemapper AND sets display gamma to 1 for linear UNORM.
     # Applying an sRGB decode here would incorrectly darken the measured palette.
     return image/255
 def equal(a,b,limit=2):

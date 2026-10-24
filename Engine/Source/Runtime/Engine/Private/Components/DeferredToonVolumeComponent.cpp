@@ -260,6 +260,7 @@ void UDeferredToonVolumeComponent::SetOtherLightingWeight(float NewValue) { DTOO
 // [DeferredToon] Direct-highlight authoring does not modify material properties.
 void UDeferredToonVolumeComponent::SetDirectSpecularStyle(EDeferredToonDirectSpecularStyle NewValue) { DTOON_SET(DirectSpecularStyle, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetDirectSpecularThreshold(float NewValue) { DTOON_SET(DirectSpecularThreshold, FMath::Max(NewValue, 0.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetDirectSpecularColorMode(EDeferredToonDirectSpecularColorMode NewValue) { DTOON_SET(DirectSpecularColorMode, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetDirectSpecularColor(FLinearColor NewValue) { DTOON_SET(DirectSpecularColor, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetDirectSpecularIntensity(float NewValue) { DTOON_SET(DirectSpecularIntensity, FMath::Max(NewValue, 0.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetOverrideIndirectDiffuse(bool NewValue) { DTOON_SET(bOverrideIndirectDiffuse, NewValue, MarkRenderStateDirty()); }

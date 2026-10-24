@@ -83,8 +83,9 @@ void Apply(bool bChinese)
         // [DeferredToon] Compact direct-highlight controls.
         {TEXT("DirectSpecularStyle"), TEXT("高光方式"), TEXT("原生：高光沿用保留其他光照。硬边单档：独立替换实际直接光高光，使用 UE 的阴影、衰减与通道结果。不包含环境反射或 Lumen 反射。")},
         {TEXT("DirectSpecularThreshold"), TEXT("高光范围阈值"), TEXT("对去预曝光后的实际直接光高光亮度做硬阈值判断。越高范围越小；零光照不会产生高光。不是归一化值，粗糙度、法线、视角及光源仍决定形状。视图 39 查看遮罩。")},
-        {TEXT("DirectSpecularColor"), TEXT("高光颜色"), TEXT("硬边区域内的固定线性颜色，不再乘材质底色或原生灯光颜色。最终仍经过 UE 曝光与色调映射。")},
-        {TEXT("DirectSpecularIntensity"), TEXT("高光强度"), TEXT("只缩放高光颜色，不改变选区。0 移除已分离的原生直接高光。硬边模式下该层独立于保留其他光照。")},
+        {TEXT("DirectSpecularColorMode"), TEXT("高光配色来源"), TEXT("材质与灯光颜色：保留原生有效高光的 RGB 比例，只对亮度分档，包含 F0、菲涅尔与多光源混色。固定颜色替换：只使用指定颜色。两种方式均不改变遮罩。")},
+        {TEXT("DirectSpecularColor"), TEXT("高光染色 / 替换色"), TEXT("白色为中性染色：乘在原生高光颜色比例上。固定颜色替换模式下作为输出颜色。原生输入已含材质 F0 和灯光颜色，不再重复相乘。最终仍经过 UE 曝光与色调映射。")},
+        {TEXT("DirectSpecularIntensity"), TEXT("高光强度"), TEXT("材质与灯光颜色模式下，控制染色前的单档线性亮度；固定颜色模式下缩放替换色。均不改变选区，0 移除已分离的直接高光。独立于保留其他光照。")},
         {TEXT("bOverrideIndirectDiffuse"), TEXT("独立调整间接漫反射"), TEXT("从其他光照中分出支持的 Lumen 或动态天光漫反射。不改变直接光档位；不支持的像素沿用原合成。")},
         {TEXT("IndirectDiffuseIntensity"), TEXT("强度"), TEXT("1 保留原始强度；0 去除已分离的间接漫反射。")},
         {TEXT("IndirectDiffuseColor"), TEXT("颜色 / 亮部颜色"), TEXT("严格二分时为固定亮色；原有调色时为线性空间乘色或替换色。颜色替换为 0 时白色为中性；最后仍经过 UE 曝光和色调映射。")},
@@ -183,6 +184,11 @@ void Apply(bool bChinese)
         {TEXT("HardSingleBand"), TEXT("硬边单档")},
     };
     TranslateEnum(TEXT("/Script/Engine.EDeferredToonDirectSpecularStyle"), SpecularStyles, bChinese);
+    const FEnumText SpecularColorModes[] = {
+        {TEXT("NativeChroma"), TEXT("材质与灯光颜色")},
+        {TEXT("FixedColor"), TEXT("固定颜色替换")},
+    };
+    TranslateEnum(TEXT("/Script/Engine.EDeferredToonDirectSpecularColorMode"), SpecularColorModes, bChinese);
     const FEnumText Enum1[] = {
         {TEXT("NativeComposite"), TEXT("0 - 当前输出")},
         {TEXT("BoxInfluence"), TEXT("1 - 盒体影响范围")},
