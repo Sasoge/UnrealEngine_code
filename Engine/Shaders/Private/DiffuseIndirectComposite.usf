@@ -347,6 +347,7 @@ FSubstrateDeferredLighting SubstrateIndirectLighting(
 // [DeferredToon] Separate from native render targets: dual-source slots are not MRTs.
 #if TOON_EXPORT_INDIRECT_DIFFUSE
 RWTexture2D<float4> ToonIndirectDiffuseOutput;
+RWTexture2D<float4> ToonIndirectSpecularOutput;
 // [DeferredToon] Only the separate Lumen short-range term is removed; GI remains.
 #if DIM_APPLY_DIFFUSE_INDIRECT == DIM_APPLY_DIFFUSE_INDIRECT_SCREEN_PROBE_GATHER && DIM_SCREEN_BENT_NORMAL_MODE > 0
 RWTexture2D<float4> ToonLumenDiffuseBeforeShortAOOutput;
@@ -685,6 +686,15 @@ void MainPS(
 		{
 			IndirectLighting.Specular = 0;
 		}
+        #if TOON_EXPORT_INDIRECT_DIFFUSE
+        // Export after native occlusion/material response and custom Toon suppression.
+        // Do not mix diffuse, or infer reflections from a SceneColor subtraction.
+        const bool bToonSpecularValid = IsValid(Material) && !Material.bNeedsSeparateLightAccumulation
+            && Material.GBufferData.ShadingModelID != SHADINGMODELID_HAIR
+            && Material.GBufferData.ShadingModelID != SHADINGMODELID_SINGLELAYERWATER;
+        ToonIndirectSpecularOutput[PixelPos] = bToonSpecularValid
+            ? float4(IndirectLighting.Specular, 1.0f) : 0.0f;
+        #endif
 		FLightAccumulator LightAccumulator = (FLightAccumulator)0;
 		LightAccumulator_Add(
 			LightAccumulator,

@@ -401,6 +401,10 @@ FLumenReflectionOnlyOutput GetLumenReflectionOnly(
 #endif // SUBTRATE_GBUFFER_FORMAT==1
 
 
+#if TOON_EXPORT_INDIRECT_SPECULAR
+RWTexture2D<float4> ToonIndirectSpecularOutput;
+#endif
+
 // [DeferredToon] Same texture contract as the Lumen diffuse provider.
 #if TOON_EXPORT_SKY_DIFFUSE
 RWTexture2D<float4> ToonSkyDiffuseOutput;
@@ -587,6 +591,12 @@ void ReflectionEnvironmentSkyLighting(
 
 	uint ShadingModelID = GBuffer.ShadingModelID;
 	const bool bUnlitMaterial = ShadingModelID == SHADINGMODELID_UNLIT;
+    #if TOON_EXPORT_INDIRECT_SPECULAR
+    const bool bToonSpecularValid = !bUnlitMaterial && ShadingModelID != SHADINGMODELID_HAIR
+        && !UseSubsurfaceProfile(ShadingModelID) && ShadingModelID != SHADINGMODELID_SINGLELAYERWATER;
+    // Valid zero includes the custom Toon model's intentional suppression.
+    ToonIndirectSpecularOutput[PixelPos] = float4(0, 0, 0, bToonSpecularValid ? 1.0f : 0.0f);
+    #endif
 
 	float3 DiffuseColor = GBuffer.DiffuseColor;
 	float3 SpecularColor = GBuffer.SpecularColor;
@@ -660,7 +670,11 @@ void ReflectionEnvironmentSkyLighting(
 	else if (!bUnlitMaterial && ShadingModelID != SHADINGMODELID_HAIR)
 	//////////////////////end//////////////////////////
 	{
-		OutColor.xyz += ReflectionEnvironment(GBuffer, AmbientOcclusion, BufferUV, ScreenPosition, SvPosition, BentNormal, SpecularColor, ShadingModelID);
+        const float3 NativeIndirectSpecular = ReflectionEnvironment(GBuffer, AmbientOcclusion, BufferUV, ScreenPosition, SvPosition, BentNormal, SpecularColor, ShadingModelID);
+        OutColor.xyz += NativeIndirectSpecular;
+        #if TOON_EXPORT_INDIRECT_SPECULAR
+        ToonIndirectSpecularOutput[PixelPos] = bToonSpecularValid ? float4(NativeIndirectSpecular, 1.0f) : 0.0f;
+        #endif
 	}
 
 #endif // SUBTRATE_GBUFFER_FORMAT==1

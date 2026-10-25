@@ -229,6 +229,8 @@ void Apply(bool bChinese)
         {TEXT("IndirectOcclusionBand"), TEXT("38 - 遮蔽二分遮罩（白为无遮挡）")},
         {TEXT("DirectSpecularMask"), TEXT("39 - 直接高光硬边遮罩")},
         {TEXT("StyledDirectSpecular"), TEXT("40 - 风格化直接光高光")},
+        {TEXT("IndirectSpecular"), TEXT("41 - 间接镜面反射（环境反射）")},
+        {TEXT("IndirectSpecularCoverage"), TEXT("42 - 间接镜面反射可用范围")},
         {TEXT("ConsoleGlobal"), TEXT("跟随全局 / 控制台")},
     };
     TranslateEnum(TEXT("/Script/Engine.EDeferredToonDebugView"), Enum1, bChinese);

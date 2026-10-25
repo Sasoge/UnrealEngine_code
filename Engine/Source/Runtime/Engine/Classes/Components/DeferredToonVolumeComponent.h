@@ -136,6 +136,8 @@ enum class EDeferredToonDebugView : uint8
     // [DeferredToon] Append diagnostics without changing existing IDs.
     DirectSpecularMask = 39 UMETA(DisplayName="39 - Direct Specular Hard Mask"),
     StyledDirectSpecular = 40 UMETA(DisplayName="40 - Styled Direct Specular"),
+    IndirectSpecular = 41 UMETA(DisplayName="41 - Indirect Specular (Environment Reflections)"),
+    IndirectSpecularCoverage = 42 UMETA(DisplayName="42 - Indirect Specular Availability"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 

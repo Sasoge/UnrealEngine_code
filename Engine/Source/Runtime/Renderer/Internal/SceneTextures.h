@@ -166,6 +166,8 @@ struct FSceneTextures : public FMinimalSceneTextures
 	// [DeferredToon] Optional current-frame Lumen diffuse export. RGB is pre-exposed
 	// material-weighted diffuse; A is coverage (not radiance). Allocated by producer.
 	FRDGTextureRef ToonIndirectDiffuse{};
+	// [DeferredToon] Native indirect specular only; pre-exposed RGB, A coverage.
+	FRDGTextureRef ToonIndirectSpecular{};
 	// [DeferredToon] Sky-only split: pre-exposed RGB before AO, A visibility; -1 invalid.
 	FRDGTextureRef ToonSkyDiffuseBeforeAO{};
 	// [DeferredToon] Lumen RGB before short AO, alpha raw visibility; -1 invalid.

@@ -52,6 +52,8 @@ float DirectSpecularIntensity;
 // [DeferredToon] RGB pre-exposed, A coverage; alpha is never exposure-scaled.
 Texture2D IndirectDiffuseTexture;
 uint bIndirectDiffuseAvailable;
+Texture2D IndirectSpecularTexture;
+uint bIndirectSpecularAvailable;
 uint bOverrideIndirectDiffuse;
 uint IndirectDiffuseStyle;
 float IndirectDiffuseThreshold;
@@ -641,6 +643,13 @@ void MainPS(
     else if (DebugView == 25)
     {
         OutColor = float4(bValidIndirect ? max(IndirectSample.rgb, 0.0f) : 0.0f, 1.0f);
+    }
+    else if (DebugView == 41 || DebugView == 42)
+    {
+        const float4 IndirectSpecular = IndirectSpecularTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+        const bool bValid = bIndirectSpecularAvailable != 0u && IndirectSpecular.a > 0.5f;
+        OutColor = float4(DebugView == 41 ? (bValid ? max(IndirectSpecular.rgb, 0.0f) : 0.0f)
+            : (bValid ? 1.0f : 0.0f).xxx, 1.0f);
     }
     else if (DebugView == 26)
     {

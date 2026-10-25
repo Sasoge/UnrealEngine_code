@@ -212,6 +212,7 @@ class FDiffuseIndirectCompositePS : public FGlobalShader
 
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, PassDebugOutput)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonIndirectDiffuseOutput) // [DeferredToon]
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonIndirectSpecularOutput) // [DeferredToon]
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonLumenDiffuseBeforeShortAOOutput) // [DeferredToon]
 
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float3>, OutOpaqueRoughRefractionSceneColor)
@@ -338,6 +339,7 @@ class FReflectionEnvironmentSkyLightingPS : public FGlobalShader
 
 	// [DeferredToon] Export only the diffuse part of the native sky composite.
 	class FToonExportSkyDiffuse : SHADER_PERMUTATION_BOOL("TOON_EXPORT_SKY_DIFFUSE");
+	class FToonExportSpecular : SHADER_PERMUTATION_BOOL("TOON_EXPORT_INDIRECT_SPECULAR");
 	using FPermutationDomain = TShaderPermutationDomain<
 		FHasBoxCaptures,
 		FHasSphereCaptures,
@@ -347,7 +349,7 @@ class FReflectionEnvironmentSkyLightingPS : public FGlobalShader
 		FSkyShadowing,
 		FReflectionSourceType,
 		FSubstrateTileType,
-		FHairComplexTransmittance, FToonExportSkyDiffuse>;
+		FHairComplexTransmittance, FToonExportSkyDiffuse, FToonExportSpecular>;
 
 	static EReflectionSourceType GetReflectionSourceType(bool bIsLumenStandalone, bool bIsTiledSSR)
 	{
@@ -365,7 +367,12 @@ class FReflectionEnvironmentSkyLightingPS : public FGlobalShader
 
 	static FPermutationDomain RemapPermutation(FPermutationDomain PermutationVector)
 	{
-		// [DeferredToon] No export for reflection-only or Substrate permutations.
+        // [DeferredToon] Reflections do not require dynamic sky diffuse.
+        if (Substrate::IsSubstrateEnabled())
+        {
+            PermutationVector.Set<FToonExportSpecular>(false);
+        }
+		// [DeferredToon] No diffuse export for reflection-only or Substrate permutations.
 		if (!PermutationVector.Get<FSkyLight>() || !PermutationVector.Get<FDynamicSkyLight>() || Substrate::IsSubstrateEnabled())
 		{
 			PermutationVector.Set<FToonExportSkyDiffuse>(false);
@@ -440,6 +447,7 @@ class FReflectionEnvironmentSkyLightingPS : public FGlobalShader
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonSkyDiffuseOutput) // [DeferredToon]
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonIndirectSpecularOutput) // [DeferredToon]
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, ToonSkyDiffuseBeforeAOOutput) // [DeferredToon]
 		// Distance field AO parameters.
 		// TODO. FDFAOUpsampleParameters
@@ -1038,6 +1046,11 @@ void FDeferredShadingSceneRenderer::RenderDiffuseIndirectAndAmbientOcclusion(
 				FClearValueBinding::Transparent, TexCreate_ShaderResource | TexCreate_UAV),
 			TEXT("DeferredToon.IndirectDiffuse"));
 		AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(SceneTextures.ToonIndirectDiffuse), FVector4f(0, 0, 0, 0));
+        SceneTextures.ToonIndirectSpecular = GraphBuilder.CreateTexture(
+            FRDGTextureDesc::Create2D(SceneColorTexture->Desc.Extent, PF_FloatRGBA,
+                FClearValueBinding::Transparent, TexCreate_ShaderResource | TexCreate_UAV),
+            TEXT("DeferredToon.IndirectSpecular"));
+        AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(SceneTextures.ToonIndirectSpecular), FVector4f(0, 0, 0, 0));
 		// [DeferredToon] Shared frame storage; invalid sentinel also covers Lumen views.
 		SceneTextures.ToonSkyDiffuseBeforeAO = GraphBuilder.CreateTexture(
 			FRDGTextureDesc::Create2D(SceneColorTexture->Desc.Extent, PF_FloatRGBA,
@@ -1384,6 +1397,8 @@ void FDeferredShadingSceneRenderer::RenderDiffuseIndirectAndAmbientOcclusion(
 			// [DeferredToon] RDG tracks the producer-to-volume dependency through this UAV.
 			PSParameters->ToonIndirectDiffuseOutput = bExportToonDiffuse
 				? GraphBuilder.CreateUAV(SceneTextures.ToonIndirectDiffuse) : nullptr;
+            PSParameters->ToonIndirectSpecularOutput = bExportToonDiffuse
+                ? GraphBuilder.CreateUAV(SceneTextures.ToonIndirectSpecular) : nullptr;
 			PSParameters->ToonLumenDiffuseBeforeShortAOOutput = bExportShortAO
 				? GraphBuilder.CreateUAV(SceneTextures.ToonLumenDiffuseBeforeShortAO) : nullptr; // [DeferredToon]
 			PSParameters->Substrate = Substrate::BindSubstrateGlobalUniformParameters(View);
@@ -1972,6 +1987,10 @@ static void AddSkyReflectionPass(
 	const bool bExportSkyDiffuse = bSkyLight && bDynamicSkyLight && !Substrate::IsSubstrateEnabled()
 		&& SceneTextures.ToonIndirectDiffuse;
 	PermutationVector.Set<FReflectionEnvironmentSkyLightingPS::FToonExportSkyDiffuse>(bExportSkyDiffuse);
+    const bool bExportSpecular = !Substrate::IsSubstrateEnabled() && SceneTextures.ToonIndirectSpecular;
+    PermutationVector.Set<FReflectionEnvironmentSkyLightingPS::FToonExportSpecular>(bExportSpecular);
+    PassParameters->PS.ToonIndirectSpecularOutput = bExportSpecular
+        ? GraphBuilder.CreateUAV(SceneTextures.ToonIndirectSpecular) : nullptr;
 	PassParameters->PS.ToonSkyDiffuseOutput = bExportSkyDiffuse
 		? GraphBuilder.CreateUAV(SceneTextures.ToonIndirectDiffuse) : nullptr;
 	PassParameters->PS.ToonSkyDiffuseBeforeAOOutput = bExportSkyDiffuse
