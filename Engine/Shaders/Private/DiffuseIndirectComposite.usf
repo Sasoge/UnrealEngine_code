@@ -680,7 +680,11 @@ void MainPS(
 		#endif
 		#endif
 		IndirectLighting.Specular *= GetSSSCheckerboadSpecularScale(PixelPos, Material.bNeedsSeparateLightAccumulation);
-		IndirectLighting.Specular = 0;
+		// Keep the custom Toon policy local; other materials retain native reflections.
+		if (Material.GBufferData.ShadingModelID == SHADINGMODELID_TOON)
+		{
+			IndirectLighting.Specular = 0;
+		}
 		FLightAccumulator LightAccumulator = (FLightAccumulator)0;
 		LightAccumulator_Add(
 			LightAccumulator,

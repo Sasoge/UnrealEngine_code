@@ -119,3 +119,13 @@ python Tests/DeferredToon/check_direct_specular_images.py <主测试目录> <遮
 - 白色染色下有效区保持 0.12 的单档亮度（允许格式量化）；染色/强度不改变遮罩，强度减半、预曝光 1→4、生产合成与独立预览、强度 0、无光照及固定颜色回退均通过。
 - 重新运行 32 组原固定颜色模式回归，通过 `DIRECT_SPECULAR_IMAGE_PASS`；颜色误差约 0.001405，最终漫反射与高光叠加误差约 0.0000166。该场景的普通阴影对照仍不具有有效覆盖，不重复宣称本轮验证了所有阴影路径；原生高光导出未变，专用遮挡验证见第一版记录。
 - 本轮最终验收合计 80 组截图（不计排查 Gamma 时的首轮截图），不保存测试关卡或材质。启动阶段仍有已有的两条 AutomationTest 条件错误，脚本均完成，未见本轮 Shader 编译错误。此轮不包含移动镜头稳定性或城市场景法线简化验收。
+
+## 原生间接镜面反射的 Toon 作用范围修复（2026-10-25）
+
+现象：关闭盒体仍没有 Lumen 倒影；GI 与反射都为 Lumen 时无倒影，将 GI 改成无后反而可回退到 SSR。检查发现 `DiffuseIndirectComposite.usf` 在最终累加前无条件执行 `IndirectLighting.Specular = 0`。该行位于自定义 Toon 分支之外，基线提交 `9fdaae0` 中已存在，会清掉经过该非 Substrate 合成路径的普通材质镜面贡献；现有历史无法确定基线之前的作者意图。
+
+用户确认希望只影响自定义 Toon Shading Model。修复是在原位置增加 `Material.GBufferData.ShadingModelID == SHADINGMODELID_TOON` 条件：Toon 材质沿用原有禁用策略，Default Lit 等其他材质保留已经计算的原生间接镜面结果。使用外层有效的 `Material.GBufferData`，避免引用前面局部作用域的 `GBuffer`。
+
+这是原生间接光合成的作用范围修复，不是新增盒体环境反射风格化。直接高光、间接漫反射导出及独立 AO 算法未改；恢复后的环境反射仍按盒体现有的剩余光照合成规则处理。本次只修改 USF，不需要重新编译 C++。正在运行的编辑器可执行 `RecompileShaders Changed` 加载，或重启后加载新 Shader。
+
+验证：在独立 D3D12/SM6 测试进程中关闭盒体、启用 Lumen GI 与反射、关闭 SSR，创建临时低粗糙度金属平面及红/绿自发光物体。分别使用 Default Lit 与自定义 Toon 材质，对比 `r.Lumen.Reflections.Allow` 开关，共四组 960×540 截图。普通材质出现清晰红球/绿方块倒影；选定倒影区域的开关差异为平均 17.514/255、4905 个像素差异超过 10/255。Toon 材质相同区域开关差异为 0，保持禁用策略。结果为 `TOON_REFLECTION_SCOPE_PASS`。Shader 编译与运行完成，未保存场景或材质；仅启动阶段出现前述已有的两条 AutomationTest 条件错误。此验证覆盖普通非 Substrate 的 Lumen 合成路径，未将结果泛化为透明水体或所有反射路径。
