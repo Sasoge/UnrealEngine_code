@@ -1,7 +1,5 @@
 # 盒体漫反射映射：当前设计与清理边界
 
-> 调试编号说明（2026-10-26）：本文保留当时的旧编号，运行命令和界面请按[新版索引对照表](deferred-toon-debug-view-indices.md)换算；`AOFilterDebug` 子模式编号不变。
-
 2026-10-26 总览入口：[光照独立输出：来源、提取与合成](deferred-toon-lighting-output-reference.md)。集中记录各分量对应的 Pass、Shader 提取点、RT 通道、曝光／有效性、AO 路径、当前合成顺序及未拆分范围；各专题保留实现和验证细节。
 
 2026-10-26 增补：[材质自发光独立输出](deferred-toon-emissive.md) 从 Base Pass 的材质 Emissive 单独导出，提供调试视图 43/44 与可见发光强度控制。独立开启后不受漫反射调色、AO 和保留其他光照权重影响；不改变 Lumen GI 或倒影中的发光贡献。

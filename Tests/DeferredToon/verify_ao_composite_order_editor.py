@@ -43,8 +43,8 @@ def direct_color():
 for provider, select in [('lumen', lumen_again), ('sky', sky_only)]:
     prefix = provider + '-order-'
     phases.extend([
-        (prefix+'valid', [select, configure, lambda:d(53)]),
-        (prefix+'mask', [lambda:d(51)]),
+        (prefix+'valid', [select, configure, lambda:d(35)]),
+        (prefix+'mask', [lambda:d(38)]),
         (prefix+'replace-before', [lambda:strength(0), lambda:d(0)]),
         (prefix+'replace-hard', [lambda:strength(1)]),
         (prefix+'replace-half', [lambda:strength(.5)]),
@@ -52,7 +52,7 @@ for provider, select in [('lumen', lumen_again), ('sky', sky_only)]:
                                lambda:apply('set_indirect_diffuse_threshold',1e6), lambda:strength(0)]),
         (prefix+'dark-hard', [lambda:strength(1)]),
         (prefix+'dark-half', [lambda:strength(.5)]),
-        (prefix+'band-before', [lambda:apply('set_indirect_diffuse_threshold',.1), lambda:strength(0), lambda:d(42)]),
+        (prefix+'band-before', [lambda:apply('set_indirect_diffuse_threshold',.1), lambda:strength(0), lambda:d(37)]),
         (prefix+'band-hard', [lambda:strength(1)]),
         (prefix+'direct-only', [direct_color, lambda:apply('set_indirect_diffuse_intensity',0), lambda:d(0)]),
         (prefix+'composite-before', [lambda:apply('set_indirect_diffuse_intensity',1),
@@ -60,7 +60,7 @@ for provider, select in [('lumen', lumen_again), ('sky', sky_only)]:
         (prefix+'composite-hard', [lambda:strength(1)]),
     ])
 phases.extend([
-    ('order-missing-valid', [lambda:sky_visibility(False), lambda:d(53)]),
+    ('order-missing-valid', [lambda:sky_visibility(False), lambda:d(35)]),
     ('order-missing-hard', [lambda:d(0)]),
     ('order-missing-native', [lambda:mode(Mode.NATIVE)]),
 ])

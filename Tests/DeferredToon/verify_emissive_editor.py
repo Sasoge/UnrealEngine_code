@@ -107,25 +107,25 @@ def cleanup_emissive():
 phases = [
     ('native', [lambda: d(0)]),
     ('neutral', [lambda: override(True), lambda: intensity(1)]),
-    ('raw', [lambda: d(90)]),
-    ('valid', [lambda: d(91)]),
-    ('raw-no-lights', [lambda: lights(False), lambda: d(90)]),
+    ('raw', [lambda: d(43)]),
+    ('valid', [lambda: d(44)]),
+    ('raw-no-lights', [lambda: lights(False), lambda: d(43)]),
     ('raw-restored', [lambda: lights(True)]),
     ('other-zero', [lambda: d(0), lambda: apply('set_other_lighting_weight', 0)]),
     ('emission-zero', [lambda: intensity(0)]),
     ('emission-half', [lambda: intensity(.5)]),
     ('emission-full', [lambda: intensity(1)]),
-    ('masked-on', [lambda: sphere.set_material(0, masked_on), lambda: d(90)]),
+    ('masked-on', [lambda: sphere.set_material(0, masked_on), lambda: d(43)]),
     ('masked-off', [lambda: sphere.set_material(0, masked_off)]),
     ('hdr-quarter-exposure', [lambda: sphere.set_material(0, lit), lambda: cube.set_material(0, hdr), lambda: command('r.EyeAdaptation.PreExposureOverride .25')]),
     ('hdr-quarter-output', [lambda: d(0), lambda: intensity(.25)]),
-    ('exposure-restored', [lambda: d(90), lambda: intensity(1), lambda: cube.set_material(0, unlit), lambda: command('r.EyeAdaptation.PreExposureOverride 1')]),
+    ('exposure-restored', [lambda: d(43), lambda: intensity(1), lambda: cube.set_material(0, unlit), lambda: command('r.EyeAdaptation.PreExposureOverride 1')]),
 ]
 if not sm5:
-    phases += [('nanite-raw', [nanite]), ('nanite-valid', [lambda: d(91)]),
+    phases += [('nanite-raw', [nanite]), ('nanite-valid', [lambda: d(44)]),
                ('nanite-output', [lambda: d(0)]), ('nanite-zero', [lambda: intensity(0)])]
-phases += [('water-valid', [lambda: cube.set_static_mesh(original_mesh), lambda: cube.set_material(0, water), lambda: d(91)]),
-           ('water-raw', [lambda: d(90)])]
+phases += [('water-valid', [lambda: cube.set_static_mesh(original_mesh), lambda: cube.set_material(0, water), lambda: d(44)]),
+           ('water-raw', [lambda: d(43)])]
 if '-emissivewateronly' in unreal.SystemLibrary.get_command_line().lower():
     phases = phases[-2:]
 loop = loop.replace('unreal.unregister_slate_post_tick_callback(handle)',

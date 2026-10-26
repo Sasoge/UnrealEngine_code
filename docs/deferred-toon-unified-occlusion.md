@@ -1,7 +1,5 @@
 # 间接漫反射遮蔽：统一入口
 
-> 调试编号说明（2026-10-26）：本文保留当时的旧编号，运行命令和界面请按[新版索引对照表](deferred-toon-debug-view-indices.md)换算；`AOFilterDebug` 子模式编号不变。
-
 2026-10-17 增补：新增 [独立 AO 二分处理](deferred-toon-ao-two-tone.md)。遮蔽控制可选“遮蔽二分（自动来源）”，对 AO 可见度进行硬阈值处理，再作用于保存的 AO 前 RGB；保留其余 GI 分布。新增视图 38。下文强度插值公式仍描述原有统一强度模式。
 
 更新：2026-10-17。此文替代两条独立 AO 面板的日常操作说明；底层数据边界仍见 [普通天光](deferred-toon-sky-occlusion.md) 和 [Lumen 短程 AO](deferred-toon-lumen-short-range-ao.md)。

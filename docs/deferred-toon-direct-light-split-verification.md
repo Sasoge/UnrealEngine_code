@@ -1,7 +1,5 @@
 # Deferred Toon DirectLight 拆分验证记录
 
-> 调试编号说明（2026-10-26）：本文保留当时的旧编号，运行命令和界面请按[新版索引对照表](deferred-toon-debug-view-indices.md)换算；`AOFilterDebug` 子模式编号不变。
-
 日期：2026-10-13  
 工程：`D:\UnrealEngine-release`  
 测试工程：`D:\UnrealEngine-release\Project\test`

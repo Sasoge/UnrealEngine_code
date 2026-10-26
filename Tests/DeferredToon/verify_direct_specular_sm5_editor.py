@@ -6,8 +6,8 @@ out = Path(unreal.Paths.project_saved_dir())/'Automation/DeferredToonDirectSpecu
 out.mkdir(parents=True,exist_ok=True)
 phases = [
     ('native',[lambda:d(0)]),
-    ('both-source',[lambda:point.set_visibility(True),lambda:d(30)]),
-    ('mask',[lambda:threshold(.1),lambda:d(31)]),
-    ('styled',[lambda:style(Style.HARD_SINGLE_BAND),color,lambda:d(32)]),
+    ('both-source',[lambda:point.set_visibility(True),lambda:d(18)]),
+    ('mask',[lambda:threshold(.1),lambda:d(39)]),
+    ('styled',[lambda:style(Style.HARD_SINGLE_BAND),color,lambda:d(40)]),
     ('composite',[lambda:d(0)]),
 ]

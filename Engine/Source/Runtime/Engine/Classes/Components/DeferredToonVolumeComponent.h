@@ -81,69 +81,65 @@ enum class EDeferredToonIndirectOcclusionMode : uint8
     HardTwoTone = 3 UMETA(DisplayName="AO Two-Tone (Automatic Source)"),
 };
 
-// [DeferredToon] Explicit values are permanent serialized/shader IDs, NOT console indices.
-// Display numbers and the global CVar use the grouped public indices in DeferredToonDebugViews.h.
-// Reordering declarations is safe; never renumber values or rename enumerators for UI changes.
+// [DeferredToon] Details-panel selector for the same semantic views exposed by
+// r.Toon.DeferredVolumes.DebugView.  Console / Global keeps the legacy CVar
+// behavior when no per-volume override is desired.
 UENUM(BlueprintType)
 enum class EDeferredToonDebugView : uint8
 {
-    // Output / 盒体与输出
     NativeComposite = 0 UMETA(DisplayName="0 - Selected Output"),
     BoxInfluence = 1 UMETA(DisplayName="1 - Box Influence"),
-    Priority = 3 UMETA(DisplayName="2 - Priority"),
-    ShadowComposite = 2 UMETA(DisplayName="3 - Shadow Composite"),
-    // Surface / 表面数据
-    BaseColor = 7 UMETA(DisplayName="10 - Base Color"),
-    WorldNormal = 8 UMETA(DisplayName="11 - World Normal"),
+    ShadowComposite = 2 UMETA(DisplayName="2 - Shadow Composite"),
+    Priority = 3 UMETA(DisplayName="3 - Priority"),
+    DirectLight = 4 UMETA(DisplayName="4 - Direct Light"),
+    NativeShadow = 5 UMETA(DisplayName="5 - Native Shadow"),
+    ShadowChannel = 6 UMETA(DisplayName="6 - Shadow Channel"),
+    BaseColor = 7 UMETA(DisplayName="7 - Base Color"),
+    WorldNormal = 8 UMETA(DisplayName="8 - World Normal"),
+    AmbientOcclusion = 9 UMETA(DisplayName="9 - Screen Space AO"),
+    StyleMask = 10 UMETA(DisplayName="10 - Style Mask"),
+    StyleColor = 11 UMETA(DisplayName="11 - Style Color"),
     Depth = 12 UMETA(DisplayName="12 - Linear Depth"),
     Velocity = 13 UMETA(DisplayName="13 - Velocity"),
-    // Direct diffuse / 直接漫反射
-    EffectiveDirectLight = 22 UMETA(DisplayName="20 - Effective Direct Diffuse"),
-    EffectiveLightResponse = 23 UMETA(DisplayName="21 - Effective Light Response"),
-    LightBandValue = 24 UMETA(DisplayName="22 - Selected Light Band (0 Dark / 1 Light)"),
-    DirectLightMask = 14 UMETA(DisplayName="23 - Direct Light Mask"),
-    ToonShadowMask = 19 UMETA(DisplayName="24 - Toon Shadow Mask"),
-    ToonBinaryShadowMask = 20 UMETA(DisplayName="25 - Toon Binary Shadow Mask"),
-    DirectLight = 4 UMETA(DisplayName="26 - Direct Light"),
-    DirectLightFacing = 21 UMETA(DisplayName="27 - Direct Light Facing (N dot L)"),
-    // Direct specular / 直接高光
-    SpecularDirectLight = 18 UMETA(DisplayName="30 - Effective Direct Specular"),
-    DirectSpecularMask = 39 UMETA(DisplayName="31 - Direct Specular Hard Mask"),
-    StyledDirectSpecular = 40 UMETA(DisplayName="32 - Styled Direct Specular"),
-    // Indirect diffuse / 间接漫反射
-    IndirectDiffuse = 25 UMETA(DisplayName="40 - Indirect Diffuse"),
-    IndirectDiffuseCoverage = 26 UMETA(DisplayName="41 - Indirect Diffuse Availability"),
-    IndirectDiffuseBand = 37 UMETA(DisplayName="42 - Indirect Diffuse Two-Tone Mask"),
-    // Occlusion / 综合遮蔽
-    IndirectOcclusion = 33 UMETA(DisplayName="50 - Indirect Diffuse Occlusion (Automatic)"),
-    IndirectOcclusionBand = 38 UMETA(DisplayName="51 - AO Two-Tone Mask (White = Unoccluded)"),
-    IndirectDiffuseBeforeOcclusion = 34 UMETA(DisplayName="52 - Indirect Diffuse Before Occlusion (Automatic)"),
-    IndirectOcclusionCoverage = 35 UMETA(DisplayName="53 - Indirect Occlusion Availability"),
-    IndirectOcclusionSource = 36 UMETA(DisplayName="54 - AO Source (Cyan=Lumen, Orange=Sky, Black=None)"),
-    AmbientOcclusion = 9 UMETA(DisplayName="55 - Screen Space AO"),
-    // Sky / 非 Lumen 天光
-    SkyDiffuseBeforeAO = 27 UMETA(DisplayName="60 - Sky Diffuse Before AO"),
-    SkyOcclusion = 28 UMETA(DisplayName="61 - Sky Combined AO (White = Unoccluded)"),
-    SkyOcclusionCoverage = 29 UMETA(DisplayName="62 - Sky AO Split Availability"),
-    // Lumen short AO / Lumen 短程 AO
-    LumenDiffuseBeforeShortAO = 31 UMETA(DisplayName="70 - Lumen Diffuse Before Short Range AO"),
-    LumenShortRangeAO = 30 UMETA(DisplayName="71 - Lumen Short Range AO (White = Unoccluded)"),
-    LumenShortRangeAOCoverage = 32 UMETA(DisplayName="72 - Lumen Short Range AO Availability"),
-    // Reflections / 环境镜面反射
-    IndirectSpecular = 41 UMETA(DisplayName="80 - Indirect Specular (Environment Reflections)"),
-    IndirectSpecularCoverage = 42 UMETA(DisplayName="81 - Indirect Specular Availability"),
-    // Emission / 自发光
-    Emissive = 43 UMETA(DisplayName="90 - Material Emissive"),
-    EmissiveCoverage = 44 UMETA(DisplayName="91 - Material Emissive Availability"),
-    // Shadow inputs / 阴影输入与旧版诊断
-    NativeShadow = 5 UMETA(DisplayName="100 - Native Shadow"),
-    ShadowChannel = 6 UMETA(DisplayName="101 - Shadow Channel"),
-    CombinedShadowMask = 17 UMETA(DisplayName="102 - Combined Shadow Mask"),
+    DirectLightMask = 14 UMETA(DisplayName="14 - Direct Light Mask"),
     NativeShadowMask = 15 UMETA(Hidden),
     ShadowChannelMask = 16 UMETA(Hidden),
-    // Style layers / 实验分层
-    StyleMask = 10 UMETA(DisplayName="110 - Style Mask"),
-    StyleColor = 11 UMETA(DisplayName="111 - Style Color"),
+    CombinedShadowMask = 17 UMETA(DisplayName="17 - Combined Shadow Mask"),
+    SpecularDirectLight = 18 UMETA(DisplayName="18 - Effective Direct Specular"),
+    ToonShadowMask = 19 UMETA(DisplayName="19 - Toon Shadow Mask"),
+    // [DeferredToon] Strict effective-light selection plus artistic shadow override.
+    ToonBinaryShadowMask = 20 UMETA(DisplayName="20 - Toon Binary Shadow Mask"),
+    DirectLightFacing = 21 UMETA(DisplayName="21 - Direct Light Facing (N dot L)"),
+    // [DeferredToon] Independent scene-linear color and selection inputs.
+    EffectiveDirectLight = 22 UMETA(DisplayName="22 - Effective Direct Diffuse"),
+    EffectiveLightResponse = 23 UMETA(DisplayName="23 - Effective Light Response"),
+    // [DeferredToon] Display discrete light level; unlike shadow masks, 1 means brightest.
+    LightBandValue = 24 UMETA(DisplayName="24 - Selected Light Band (0 Dark / 1 Light)"),
+    // [DeferredToon] Append only: preserve saved debug IDs.
+    IndirectDiffuse = 25 UMETA(DisplayName="25 - Indirect Diffuse"),
+    IndirectDiffuseCoverage = 26 UMETA(DisplayName="26 - Indirect Diffuse Availability"),
+    // [DeferredToon] Sky-only split diagnostics; existing debug IDs remain stable.
+    SkyDiffuseBeforeAO = 27 UMETA(DisplayName="27 - Sky Diffuse Before AO"),
+    SkyOcclusion = 28 UMETA(DisplayName="28 - Sky Combined AO (White = Unoccluded)"),
+    SkyOcclusionCoverage = 29 UMETA(DisplayName="29 - Sky AO Split Availability"),
+    // [DeferredToon] Append IDs to preserve serialized debug selections.
+    LumenShortRangeAO = 30 UMETA(DisplayName="30 - Lumen Short Range AO (White = Unoccluded)"),
+    LumenDiffuseBeforeShortAO = 31 UMETA(DisplayName="31 - Lumen Diffuse Before Short Range AO"),
+    LumenShortRangeAOCoverage = 32 UMETA(DisplayName="32 - Lumen Short Range AO Availability"),
+    // [DeferredToon] Aggregated diagnostics; raw source views 27-32 stay stable.
+    IndirectOcclusion = 33 UMETA(DisplayName="33 - Indirect Diffuse Occlusion (Automatic)"),
+    IndirectDiffuseBeforeOcclusion = 34 UMETA(DisplayName="34 - Indirect Diffuse Before Occlusion (Automatic)"),
+    IndirectOcclusionCoverage = 35 UMETA(DisplayName="35 - Indirect Occlusion Availability"),
+    IndirectOcclusionSource = 36 UMETA(DisplayName="36 - AO Source (Cyan=Lumen, Orange=Sky, Black=None)"),
+    IndirectDiffuseBand = 37 UMETA(DisplayName="37 - Indirect Diffuse Two-Tone Mask"),
+    IndirectOcclusionBand = 38 UMETA(DisplayName="38 - AO Two-Tone Mask (White = Unoccluded)"),
+    // [DeferredToon] Append diagnostics without changing existing IDs.
+    DirectSpecularMask = 39 UMETA(DisplayName="39 - Direct Specular Hard Mask"),
+    StyledDirectSpecular = 40 UMETA(DisplayName="40 - Styled Direct Specular"),
+    IndirectSpecular = 41 UMETA(DisplayName="41 - Indirect Specular (Environment Reflections)"),
+    IndirectSpecularCoverage = 42 UMETA(DisplayName="42 - Indirect Specular Availability"),
+    Emissive = 43 UMETA(DisplayName="43 - Material Emissive"),
+    EmissiveCoverage = 44 UMETA(DisplayName="44 - Material Emissive Availability"),
     ConsoleGlobal = 255 UMETA(DisplayName="Console / Global"),
 };
 
@@ -208,7 +204,7 @@ public:
     UPROPERTY(BlueprintReadWrite, Category="Deferred Toon Volume|Deprecated", meta=(DeprecatedProperty, DeprecationMessage="Effective lighting is now the only production selector."))
     bool bUseEffectiveLighting = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Bands", meta=(ClampMin="0.0", UIMax="10.0", ToolTip="Two-band compatibility threshold. With Light Bands enabled, use their Min Response values instead. Debug 23/24/25 retain this binary reference.", DisplayName="Two-Band Threshold", DisplayPriority="1"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Bands", meta=(ClampMin="0.0", UIMax="10.0", ToolTip="Two-band compatibility threshold. With Light Bands enabled, use their Min Response values instead. Debug 14/19/20 retain this binary reference.", DisplayName="Two-Band Threshold", DisplayPriority="1"))
     float EffectiveLightThreshold = 0.1f;
 
     // [DeferredToon] Opt in so existing serialized volumes retain their two-band behavior.
@@ -231,7 +227,7 @@ public:
     float OtherLightingWeight = 1.0f;
 
     // [DeferredToon] Opt-in preserves old assets and exposes reflections independently.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Reflections", meta=(DisplayName="Adjust Environment Reflections Separately", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Extract supported native indirect specular from Other Lighting and control it independently. Works with Keep Other Lighting at zero. Missing exports retain the original residual behavior; view 81 shows availability. Does not enable reflections on materials where the native shader suppresses them."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Reflections", meta=(DisplayName="Adjust Environment Reflections Separately", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Extract supported native indirect specular from Other Lighting and control it independently. Works with Keep Other Lighting at zero. Missing exports retain the original residual behavior; view 42 shows availability. Does not enable reflections on materials where the native shader suppresses them."))
     bool bOverrideIndirectSpecular = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Reflections", meta=(DisplayName="Reflection Intensity", ClampMin="0.0", UIMax="4.0", EditCondition="bOverrideIndirectSpecular && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="0 removes the extracted environment reflection; 1 preserves its native contribution. Independent of indirect diffuse, its AO controls and Keep Other Lighting. Native material/F0 and reflected colors are preserved. UE exposure and tonemapping still apply."))
@@ -247,7 +243,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Specular", meta=(DisplayName="Highlight Style", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Native preserves existing direct specular in Other Lighting. Hard Single Band replaces only the visible direct-specular contribution with a hard luminance band and the selected color source inside its mask. Environment/Lumen reflections are separate."))
     EDeferredToonDirectSpecularStyle DirectSpecularStyle = EDeferredToonDirectSpecularStyle::Native;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Specular", meta=(DisplayName="Highlight Threshold", ClampMin="0.0", UIMax="1.0", EditCondition="DirectSpecularStyle == EDeferredToonDirectSpecularStyle::HardSingleBand && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Hard threshold of scene-linear native visible specular luminance. Higher values shrink the highlight; zero light never creates a highlight. Not normalized. Material roughness, normals, camera and lights still determine its shape. View 31 previews the mask."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Specular", meta=(DisplayName="Highlight Threshold", ClampMin="0.0", UIMax="1.0", EditCondition="DirectSpecularStyle == EDeferredToonDirectSpecularStyle::HardSingleBand && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Hard threshold of scene-linear native visible specular luminance. Higher values shrink the highlight; zero light never creates a highlight. Not normalized. Material roughness, normals, camera and lights still determine its shape. View 39 previews the mask."))
     float DirectSpecularThreshold = 0.1f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Specular", meta=(DisplayName="Highlight Color Source", EditCondition="DirectSpecularStyle == EDeferredToonDirectSpecularStyle::HardSingleBand && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Material & Light Color preserves the native effective specular RGB ratio (including F0, Fresnel and mixed light colors) and quantizes luminance only. Fixed Color Replacement uses the authored color alone. Neither mode changes the mask."))
@@ -290,7 +286,7 @@ public:
     float IndirectOcclusionStrength = 1.0f;
 
     // [DeferredToon] Threshold native visibility, never indirect RGB luminance.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Occlusion", meta=(DisplayName="AO Two-Tone Threshold", DisplayPriority="2", ClampMin="0.0", ClampMax="1.0", EditCondition="IndirectOcclusionMode == EDeferredToonIndirectOcclusionMode::HardTwoTone && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Native AO visibility below this threshold selects occlusion; equality is unoccluded. Higher values grow the occluded region. Restores captured diffuse before AO, grades it, then applies a two-level scalar attenuation after all indirect color replacement and banding. Does not quantize GI brightness or color. Use view 51 to inspect the binary mask."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Occlusion", meta=(DisplayName="AO Two-Tone Threshold", DisplayPriority="2", ClampMin="0.0", ClampMax="1.0", EditCondition="IndirectOcclusionMode == EDeferredToonIndirectOcclusionMode::HardTwoTone && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Native AO visibility below this threshold selects occlusion; equality is unoccluded. Higher values grow the occluded region. Restores captured diffuse before AO, grades it, then applies a two-level scalar attenuation after all indirect color replacement and banding. Does not quantize GI brightness or color. Use view 38 to inspect the binary mask."))
     float IndirectOcclusionThreshold = 0.8f;
 
 
@@ -328,7 +324,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Textures", meta=(ToolTip="UV offset shared by box-local triplanar projections.", DisplayName="Texture Offset", DisplayPriority="3", EditCondition="ShadowTexture != nullptr && ((OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade || OutputMode == EDeferredToonVolumeOutputMode::ToonRecompose) || OutputMode == EDeferredToonVolumeOutputMode::NativeComposite)", EditConditionHides))
     FVector2D ShadowTextureOffset = FVector2D::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Debug", meta=(DisplayName="Buffer Preview", DisplayPriority="0", ToolTip="Local buffer preview. Console / Global follows the debug remote or CVar; Selected Output shows the current output mode. 22 displays the selected band."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Debug", meta=(DisplayName="Buffer Preview", DisplayPriority="0", ToolTip="Local buffer preview. Console / Global follows the debug remote or CVar; Selected Output shows the current output mode. 24 displays the selected band."))
     EDeferredToonDebugView DebugView;
 
     // [DeferredToon] This is the editor-facing switch for the authoring UI.

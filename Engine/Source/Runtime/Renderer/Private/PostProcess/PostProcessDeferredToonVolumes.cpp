@@ -1,7 +1,6 @@
 #include "PostProcess/PostProcessDeferredToonVolumes.h"
 
 #include "DeferredToonVolumeSceneProxy.h"
-#include "DeferredToonDebugViews.h"
 #include "Engine/DeferredToonInputRegistry.h"
 #include "DataDrivenShaderPlatformInfo.h"
 #include "GlobalRenderResources.h"
@@ -36,7 +35,8 @@ namespace
 	TAutoConsoleVariable<int32> CVarDeferredToonVolumesDebugView(
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
-		DeferredToonDebugViews::GetConsoleHelp(),
+		// [DeferredToon] View 20 previews the new independent two-band output mask.
+		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light), 25 indirect diffuse (Lumen or dynamic sky), 26 indirect availability, 27 sky diffuse before AO, 28 sky combined AO (white=unoccluded), 29 sky split availability, 30 Lumen short AO, 31 Lumen diffuse before short AO, 32 Lumen short AO availability, 33 auto AO, 34 auto diffuse before AO, 35 auto availability, 36 provider (cyan=Lumen/orange=sky/black=none), 37 indirect two-tone mask, 38 AO two-tone mask (white=unoccluded), 39 direct specular hard mask, 40 styled direct specular, 41 native indirect specular (environment reflections), 42 indirect specular availability, 43 material emission, 44 emission availability. 18 shows effective shadowed direct specular."),
 		ECVF_RenderThreadSafe);
 
     TAutoConsoleVariable<int32> CVarDeferredToonAOCleanup(
@@ -44,7 +44,7 @@ namespace
         TEXT("Remove tiny dark AO features with geometry-aware hard-mask opening. 0 disables; 1 enables (default)."), ECVF_RenderThreadSafe);
     TAutoConsoleVariable<int32> CVarDeferredToonAOFilterDebug(
         TEXT("r.Toon.DeferredVolumes.AOFilterDebug"), 0,
-        TEXT("Override public debug view 51 only: 0 hard AO, 1 filtered continuous visibility, 2 filter support, 3 depth-derived normals, 4 accepted temporal history, 5 history rejection reason (white=accepted, gray=reset, cyan=outside, yellow=source, magenta=normal, red=plane, blue=motion, orange=insufficient coverage)."), ECVF_RenderThreadSafe);
+        TEXT("Override view 38 only: 0 hard AO, 1 filtered continuous visibility, 2 filter support, 3 depth-derived normals, 4 accepted temporal history, 5 history rejection reason (white=accepted, gray=reset, cyan=outside, yellow=source, magenta=normal, red=plane, blue=motion, orange=insufficient coverage)."), ECVF_RenderThreadSafe);
 
     TAutoConsoleVariable<float> CVarDeferredToonAOHysteresis(
         TEXT("r.Toon.DeferredVolumes.AOHysteresis"), 0.04f,
@@ -561,7 +561,7 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return DeferredToonDebugViews::ToShaderId(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread()); // Public console index -> stable shader ID.
+	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 44); // [DeferredToon] Appended indirect diffuse diagnostics.
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(

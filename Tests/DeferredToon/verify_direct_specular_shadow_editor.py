@@ -18,7 +18,7 @@ blocker_mesh.set_render_in_depth_pass(False)
 blocker_mesh.set_editor_property('cast_shadow_as_two_sided',True)
 blocker_mesh.set_shadow_channel_mask(True,False,False)
 phases = [
-    ('open',[lambda:blocker_mesh.set_cast_shadow(False),lambda:d(30)]),
+    ('open',[lambda:blocker_mesh.set_cast_shadow(False),lambda:d(18)]),
     ('occluded',[lambda:blocker_mesh.set_cast_shadow(True)]),
     ('receiver-unmatched',[lambda:point.set_shadow_channel_mask(False,True,False)]),
     ('restored',[lambda:point.set_shadow_channel_mask(True,False,False),lambda:blocker_mesh.set_cast_shadow(False)]),

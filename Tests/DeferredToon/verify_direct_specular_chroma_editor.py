@@ -40,26 +40,26 @@ red=(1,.15,.03)
 blue=(.03,.15,1)
 phases=[
     ('box',[lambda:d(1)]),
-    ('dielectric-red',[lambda:case(0,white),lambda:d(30)]),
+    ('dielectric-red',[lambda:case(0,white),lambda:d(18)]),
     ('dielectric-blue',[lambda:case(1,white)]),
 ]
 for name,index,sun_color,point_color in [('colored-light',1,red,None),('gold',2,white,None),
                                        ('blue-metal',3,white,None),('mixed',4,red,blue)]:
     phases += [
-        (name+'-source',[lambda i=index,s=sun_color,p=point_color:case(i,s,p),lambda:d(30)]),
-        (name+'-mask',[lambda:d(31)]),
-        (name+'-styled',[lambda:d(32)]),
+        (name+'-source',[lambda i=index,s=sun_color,p=point_color:case(i,s,p),lambda:d(18)]),
+        (name+'-mask',[lambda:d(39)]),
+        (name+'-styled',[lambda:d(40)]),
     ]
 phases += [
     ('mixed-tint',[lambda:tint((.5,1,.8))]),
-    ('mixed-mask-tint',[lambda:d(31)]),
-    ('mixed-half',[lambda:tint(white),lambda:intensity(.06),lambda:d(32)]),
+    ('mixed-mask-tint',[lambda:d(39)]),
+    ('mixed-half',[lambda:tint(white),lambda:intensity(.06),lambda:d(40)]),
     ('mixed-preexposure',[lambda:intensity(.12),lambda:command('r.EyeAdaptation.PreExposureOverride 4')]),
     ('mixed-isolated',[lambda:command('r.EyeAdaptation.PreExposureOverride 1'),
                        lambda:isolate_direct_diffuse(True),lambda:apply('set_other_lighting_weight',0),lambda:d(0)]),
     ('mixed-zero',[lambda:intensity(0)]),
-    ('no-light',[lambda:intensity(.12),lambda:sun.set_visibility(False),lambda:point.set_visibility(False),lambda:threshold(0),lambda:d(32)]),
+    ('no-light',[lambda:intensity(.12),lambda:sun.set_visibility(False),lambda:point.set_visibility(False),lambda:threshold(0),lambda:d(40)]),
     ('fixed',[lambda:sun.set_visibility(True),lambda:point.set_visibility(True),lambda:threshold(.02),
               lambda:apply('set_direct_specular_color_mode',ColorMode.FIXED_COLOR),lambda:tint((.3,.08,.015)),lambda:intensity(1)]),
-    ('fixed-mask',[lambda:d(31)]),
+    ('fixed-mask',[lambda:d(39)]),
 ]

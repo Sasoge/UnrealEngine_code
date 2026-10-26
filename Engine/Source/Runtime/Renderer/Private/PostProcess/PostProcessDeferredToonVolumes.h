@@ -15,7 +15,7 @@ struct FDeferredToonVolumePassInputs
 	TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures;
 };
 
-// [DeferredToon] Translates the grouped console index to the stable shader ID used by the
+// [DeferredToon] Returns the clamped debug presentation mode used by the
 // pre-tonemap volume pass.  Post-processing uses it to present the debug image
 // at the final view-family resolution, matching UE's buffer visualization path.
 RENDERER_API int32 GetDeferredToonVolumeDebugView();
