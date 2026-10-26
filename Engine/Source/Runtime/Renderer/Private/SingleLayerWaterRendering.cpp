@@ -1759,6 +1759,11 @@ void FDeferredShadingSceneRenderer::RenderSingleLayerWaterInner(
 	const EGBufferLayout GBufferLayout = GetSingleLayerWaterGBufferLayout();
 	TStaticArray<FTextureRenderTargetBinding, MaxSimultaneousRenderTargets> BasePassTextures;
 	uint32 BasePassTextureCount = SceneTextures.GetGBufferRenderTargets(BasePassTextures, GBufferLayout);
+    // [DeferredToon] Water owns the extra MRT slot; it is not an emissive provider.
+    if (SceneTextures.Config.GBufferBindings[GBufferLayout].ToonEmissive.Index >= 0)
+    {
+        BasePassTextures[--BasePassTextureCount] = FTextureRenderTargetBinding();
+    }
 	if(IsWaterSeparateMainDirLightEnabled(Scene->GetShaderPlatform()))
 	{
 		const bool bNeverClear = true;
@@ -2018,6 +2023,12 @@ void FSingleLayerWaterPassMeshProcessor::CollectPSOInitializers(const FSceneText
 
 		FGraphicsPipelineRenderTargetsInfo RenderTargetsInfo;
 		SetupGBufferRenderTargetInfo(SceneTexturesConfig, RenderTargetsInfo, true /*bSetupDepthStencil*/, GBufferLayout);
+        if (SceneTexturesConfig.GBufferBindings[GBufferLayout].ToonEmissive.Index >= 0)
+        {
+            const uint32 Index = --RenderTargetsInfo.RenderTargetsEnabled;
+            RenderTargetsInfo.RenderTargetFormats[Index] = PF_Unknown;
+            RenderTargetsInfo.RenderTargetFlags[Index] = TexCreate_None;
+        }
 		if (IsWaterSeparateMainDirLightEnabled(GMaxRHIShaderPlatform))
 		{
 			AddRenderTargetInfo(PF_FloatR11G11B10, TexCreate_ShaderResource | TexCreate_RenderTargetable, RenderTargetsInfo);

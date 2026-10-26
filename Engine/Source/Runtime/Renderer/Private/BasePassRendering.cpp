@@ -915,7 +915,7 @@ static void ClearGBufferAtMaxZ(
 			ERDGPassFlags::Raster,
 			[&View, VertexShader, PixelShader, ActiveTargetCount, ClearColor0](FRDGAsyncTask, FRHICommandList& RHICmdList)
 		{
-			const FLinearColor ClearColors[MaxSimultaneousRenderTargets] =
+			FLinearColor ClearColors[MaxSimultaneousRenderTargets] =
 			{
 				ClearColor0,
 				FLinearColor(0.5f,0.5f,0.5f,0),
@@ -927,6 +927,11 @@ static void ClearGBufferAtMaxZ(
 				FLinearColor::Transparent
 			};
 
+            const int32 EmissiveIndex = View.GetSceneTextures().Config.GBufferBindings[GBL_Default].ToonEmissive.Index;
+            if (EmissiveIndex >= 0 && EmissiveIndex < int32(ActiveTargetCount))
+            {
+                ClearColors[EmissiveIndex] = FLinearColor::Transparent;
+            }
 			FGraphicsPipelineStateInitializer GraphicsPSOInit;
 			RHICmdList.ApplyCachedRenderTargets(GraphicsPSOInit);
 

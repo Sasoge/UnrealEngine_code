@@ -69,6 +69,7 @@ void FDeferredToonVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBu
         {TEXT("Toon Bands"), FText::FromString(bChinese ? TEXT("风格化 | 明暗分档") : TEXT("Toon | Light Bands")), false},
         {TEXT("Toon Palette"), FText::FromString(bChinese ? TEXT("风格化 | 配色") : TEXT("Toon | Colors")), false},
         {TEXT("Toon Specular"), FText::FromString(bChinese ? TEXT("风格化 | 直接光高光") : TEXT("Toon | Direct Specular")), true}, // [DeferredToon]
+        {TEXT("Toon Emissive"), FText::FromString(bChinese ? TEXT("风格化 | 自发光") : TEXT("Toon | Emissive")), true},
         {TEXT("Toon Reflections"), FText::FromString(bChinese ? TEXT("风格化 | 环境镜面反射") : TEXT("Toon | Environment Reflections")), true},
         {TEXT("Toon Indirect"), FText::FromString(bChinese ? TEXT("风格化 | 间接漫反射") : TEXT("Toon | Indirect Diffuse")), true}, // [DeferredToon]
         {TEXT("Toon Occlusion"), FText::FromString(bChinese ? TEXT("风格化 | 间接漫反射遮蔽") : TEXT("Toon | Indirect Diffuse Occlusion")), true}, // [DeferredToon]

@@ -86,6 +86,8 @@ void Apply(bool bChinese)
         {TEXT("DirectSpecularColorMode"), TEXT("高光配色来源"), TEXT("材质与灯光颜色：保留原生有效高光的 RGB 比例，只对亮度分档，包含 F0、菲涅尔与多光源混色。固定颜色替换：只使用指定颜色。两种方式均不改变遮罩。")},
         {TEXT("DirectSpecularColor"), TEXT("高光染色 / 替换色"), TEXT("白色为中性染色：乘在原生高光颜色比例上。固定颜色替换模式下作为输出颜色。原生输入已含材质 F0 和灯光颜色，不再重复相乘。最终仍经过 UE 曝光与色调映射。")},
         {TEXT("DirectSpecularIntensity"), TEXT("高光强度"), TEXT("材质与灯光颜色模式下，控制染色前的单档线性亮度；固定颜色模式下缩放替换色。均不改变选区，0 移除已分离的直接高光。独立于保留其他光照。")},
+        {TEXT("bOverrideEmissive"), TEXT("独立调整自发光"), TEXT("将材质自发光从其他光照中分出，保留其他光照为 0 时仍可显示。不透明/遮罩和 Nanite 的传统材质可用，包括 Unlit；不改变材质对 Lumen GI 和倒影的发光贡献。")},
+        {TEXT("EmissiveIntensity"), TEXT("自发光强度"), TEXT("0 去除已提取的可见自发光；1 保留原始 HDR 颜色和强度。不重复乘底色或灯光颜色，后续曝光和 Bloom 仍生效。透明、水、天空、Hair、独立 SSS 与 Substrate 暂不支持。")},
         {TEXT("bOverrideIndirectSpecular"), TEXT("独立调整环境镜面反射"), TEXT("从其他光照中分出支持的原生环境镜面反射，单独控制。保留其他光照为 0 时仍可添加倒影。无有效数据时沿用原合成；视图 42 可检查可用范围。不会恢复原生材质主动屏蔽的反射。")},
         {TEXT("IndirectSpecularIntensity"), TEXT("反射强度"), TEXT("0 去除分离出的环境反射；1 保留原始贡献。不受间接漫反射、漫反射 AO 及保留其他光照参数控制，保留材质/F0 与倒影颜色，仍经过 UE 曝光和色调映射。")},
         {TEXT("bOverrideIndirectDiffuse"), TEXT("独立调整间接漫反射"), TEXT("从其他光照中分出支持的 Lumen 或动态天光漫反射。不改变直接光档位；不支持的像素沿用原合成。")},
@@ -105,7 +107,7 @@ void Apply(bool bChinese)
         {TEXT("SkyOcclusionStrength"), TEXT("遮蔽强度"), TEXT("1 保留原生遮蔽；0 恢复局部 AO、弯曲法线和遮蔽染色应用前的天光漫反射。保留云遮蔽，不改变直接光阴影。")},
         {TEXT("SkyOcclusionColor"), TEXT("遮蔽颜色"), TEXT("遮蔽区域的线性替换色，只改变间接漫反射，不给直接光和反射染色。最终仍经过曝光与色调映射。")},
         {TEXT("SkyOcclusionColorReplaceWeight"), TEXT("颜色替换"), TEXT("0 保留间接光调色结果；1 按原生综合遮蔽程度和遮蔽强度混入遮蔽颜色。无遮挡处不变。")},
-        {TEXT("OtherLightingWeight"), TEXT("保留其他光照"), TEXT("只控制未单独调整的剩余光照。独立间接漫反射、环境镜面反射和硬边直接高光使用各自参数，即使此项为 0 仍可显示；1 保留其余原生贡献。这会影响最终看到的色板颜色。")},
+        {TEXT("OtherLightingWeight"), TEXT("保留其他光照"), TEXT("只控制未单独调整的剩余光照。独立自发光、间接漫反射、环境镜面反射和硬边直接高光使用各自参数，即使此项为 0 仍可显示；1 保留其余原生贡献。这会影响最终看到的色板颜色。")},
         {TEXT("bUseLightBands"), TEXT("启用多档明暗"), TEXT("支持 2～8 档。关闭或不足两档时使用二分阈值。")},
         {TEXT("EffectiveLightThreshold"), TEXT("二分受光阈值"), TEXT("二分模式的受光分界。多档模式使用每档受光下限；调试视图 14、19、20 仍使用这个二分参考阈值。")},
         {TEXT("LightBands"), TEXT("明暗档位"), TEXT("前 8 项按受光下限排序；下限相同则后项优先。至少两项。数组标题为“受光下限 / 档位值”。")},
@@ -233,6 +235,8 @@ void Apply(bool bChinese)
         {TEXT("StyledDirectSpecular"), TEXT("40 - 风格化直接光高光")},
         {TEXT("IndirectSpecular"), TEXT("41 - 间接镜面反射（环境反射）")},
         {TEXT("IndirectSpecularCoverage"), TEXT("42 - 间接镜面反射可用范围")},
+        {TEXT("Emissive"), TEXT("43 - 材质自发光")},
+        {TEXT("EmissiveCoverage"), TEXT("44 - 材质自发光可用范围")},
         {TEXT("ConsoleGlobal"), TEXT("跟随全局 / 控制台")},
     };
     TranslateEnum(TEXT("/Script/Engine.EDeferredToonDebugView"), Enum1, bChinese);

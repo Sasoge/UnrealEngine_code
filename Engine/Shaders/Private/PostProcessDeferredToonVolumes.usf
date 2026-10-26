@@ -56,6 +56,10 @@ Texture2D IndirectSpecularTexture;
 uint bIndirectSpecularAvailable;
 uint bOverrideIndirectSpecular;
 float IndirectSpecularIntensity;
+Texture2D EmissiveTexture;
+uint bEmissiveAvailable;
+uint bOverrideEmissive;
+float EmissiveIntensity;
 uint bOverrideIndirectDiffuse;
 uint IndirectDiffuseStyle;
 float IndirectDiffuseThreshold;
@@ -433,6 +437,11 @@ void MainPS(
 	const float3 LocalPosition = mul(float4(WorldPosition, 1.0f), WorldToLocal).xyz;
 	// GBuffer presence distinguishes real deferred surfaces from sky/background pixels.
 	const FGBufferData GBufferData = GetGBufferData(UV);
+    const float4 EmissiveSample = EmissiveTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+    // Water can cover a previously written opaque pixel in a later pass.
+    const bool bValidEmissive = bEmissiveAvailable != 0u && EmissiveSample.a > 0.5f
+        && GBufferData.ShadingModelID != SHADINGMODELID_SINGLELAYERWATER;
+    const bool bAdjustEmissive = bOverrideEmissive != 0u && bValidEmissive;
 	// [DeferredToon] Canonical inputs never depend on authored layer order.
 	const float4 DirectLightInput = SceneTexturesStruct.LightingBufferTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
 	const float4 BaseColorInput = float4(GBufferData.BaseColor, 1.0f);
@@ -453,7 +462,8 @@ void MainPS(
 	const float EdgeWidth = max(EdgeFalloff * 0.5f, EdgeAAWidth);
 	const float BoxWeight = smoothstep(0.0f, EdgeWidth, EdgeDistance);
 	const float FalloffWeight = SampleCurve(BoxWeight);
-	const float SurfaceMask = saturate(dot(GBufferData.WorldNormal, GBufferData.WorldNormal));
+	const float SurfaceMask = max(saturate(dot(GBufferData.WorldNormal, GBufferData.WorldNormal)),
+        (OutputMode == 4u && bAdjustEmissive) ? 1.0f : 0.0f);
 	const float Weight = saturate(BoxWeight * FalloffWeight * BlendWeight) * SurfaceMask;
 
 	// [DeferredToon] One production selector: native per-light visibility is
@@ -646,6 +656,11 @@ void MainPS(
     {
         OutColor = float4(bValidIndirect ? max(IndirectSample.rgb, 0.0f) : 0.0f, 1.0f);
     }
+    else if (DebugView == 43 || DebugView == 44)
+    {
+        OutColor = float4(DebugView == 43 ? (bValidEmissive ? max(EmissiveSample.rgb, 0.0f) : 0.0f)
+            : (bValidEmissive ? 1.0f : 0.0f).xxx, 1.0f);
+    }
     else if (DebugView == 41 || DebugView == 42)
     {
         const float4 IndirectSpecular = IndirectSpecularTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
@@ -785,9 +800,13 @@ void MainPS(
             // Residual lighting is retained explicitly, without multiplying BaseColor twice.
             const float3 BandTintedColor = EffectiveLight.rgb * MappedBandColor;
             const float3 BandReplacementColor = MappedBandColor * AuthoredBase;
-            const float3 GradedDirect = lerp(BandTintedColor, BandReplacementColor, saturate(MappedBandColorWeight)) * PrimaryView.PreExposure;
+            const float3 GradedDirect = (bAdjustEmissive && GBufferData.ShadingModelID == SHADINGMODELID_UNLIT) ? 0.0f
+                : lerp(BandTintedColor, BandReplacementColor, saturate(MappedBandColorWeight)) * PrimaryView.PreExposure;
             const float3 OriginalColor = Texture2DSampleLevel(OriginalSceneColorTexture, SceneColorSampler, UV, 0).rgb;
-            const float3 OriginalResidual = max(OriginalColor - EffectiveLight.rgb * PrimaryView.PreExposure, 0.0f);
+            const float3 ResidualWithEmission = max(OriginalColor - EffectiveLight.rgb * PrimaryView.PreExposure, 0.0f);
+            const float3 ExtractedEmission = bAdjustEmissive ? min(max(EmissiveSample.rgb, 0.0f), ResidualWithEmission) : 0.0f;
+            const float3 EmissionContribution = ExtractedEmission * max(EmissiveIntensity, 0.0f);
+            const float3 OriginalResidual = ResidualWithEmission - ExtractedEmission;
             // [DeferredToon] Remove direct specular once, before allocating the indirect
             // budget. Native opt-out preserves the old residual path exactly.
             const bool bStyleSpecular = DirectSpecularStyle == 1u && bSpecularAvailable != 0u;
@@ -840,7 +859,7 @@ void MainPS(
                 GradedIndirect *= ResolveDeferredToonFinalAO(Occlusion);
                 OtherContribution = GradedIndirect + (Residual - ExtractedIndirect) * saturate(OtherLightingWeight);
             }
-            OutputColor = lerp(SceneColor.rgb, GradedDirect + OtherContribution + EnvironmentContribution + (bStyleSpecular ? StyledSpecular : 0.0f), Weight);
+            OutputColor = lerp(SceneColor.rgb, GradedDirect + OtherContribution + EnvironmentContribution + EmissionContribution + (bStyleSpecular ? StyledSpecular : 0.0f), Weight);
         }
 		OutColor = float4(OutputColor, SceneColor.a);
 	}

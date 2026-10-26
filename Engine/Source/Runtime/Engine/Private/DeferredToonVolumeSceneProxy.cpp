@@ -39,6 +39,8 @@ FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToon
     DirectSpecularColorMode = static_cast<uint8>(Component->DirectSpecularColorMode);
     DirectSpecularColor = Component->DirectSpecularColor;
     DirectSpecularIntensity = FMath::IsFinite(Component->DirectSpecularIntensity) ? FMath::Max(Component->DirectSpecularIntensity, 0.0f) : 1.0f;
+    bOverrideEmissive = Component->bOverrideEmissive;
+    EmissiveIntensity = FMath::IsFinite(Component->EmissiveIntensity) ? FMath::Max(Component->EmissiveIntensity, 0.0f) : 1.0f;
     bOverrideIndirectSpecular = Component->bOverrideIndirectSpecular;
     IndirectSpecularIntensity = FMath::IsFinite(Component->IndirectSpecularIntensity) ? FMath::Max(Component->IndirectSpecularIntensity, 0.0f) : 1.0f;
     bOverrideIndirectDiffuse = Component->bOverrideIndirectDiffuse;

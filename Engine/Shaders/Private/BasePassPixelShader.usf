@@ -1515,6 +1515,9 @@ void FPixelShaderInOut_MainPS(
 	#endif
 
 	Emissive = GetMaterialEmissive(PixelMaterialInputs);
+#if defined(TOON_EMISSIVE_MRT_INDEX) && TOON_EMISSIVE_MRT_INDEX >= 0
+    const float3 ToonMaterialEmissive = Emissive;
+#endif
 ///////////////////////custom//////////////////////////////
 
 #endif // !SUBSTRATE_ENABLED
@@ -2357,6 +2360,14 @@ void FPixelShaderInOut_MainPS(
 	#else
 		Out.MRT[0].rgba *= ViewPreExposure;
 	#endif
+#endif
+
+#if defined(TOON_EMISSIVE_MRT_INDEX) && TOON_EMISSIVE_MRT_INDEX >= 0
+    // MRT writes inherit the native depth/opacity coverage (also Nanite material shading).
+    const bool bToonEmissionValid = GBuffer.ShadingModelID != SHADINGMODELID_HAIR
+        && GBuffer.ShadingModelID != SHADINGMODELID_SINGLELAYERWATER && !UseSubsurfaceProfile(GBuffer.ShadingModelID);
+    Out.MRT[TOON_EMISSIVE_MRT_INDEX] = bToonEmissionValid
+        ? float4(min(max(ToonMaterialEmissive * View.PreExposure, 0.0f), View.MaterialMaxEmissiveValue.xxx), 1.0f) : 0.0f;
 #endif
 
 	// If support OIT, then remove blending contribution and insert OIT sample
