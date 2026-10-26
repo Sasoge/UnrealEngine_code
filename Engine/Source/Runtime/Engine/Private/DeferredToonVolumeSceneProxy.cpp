@@ -15,6 +15,7 @@
 FDeferredToonVolumeSceneProxy::FDeferredToonVolumeSceneProxy(const UDeferredToonVolumeComponent* Component)
 {
     check(Component);
+    DebugPreviewKey = FObjectKey(Component);
     bEnabled = Component->bEnabled;
     EdgeFalloff = Component->EdgeFalloff;
     ShadowColorVolumeWeight = Component->ShadowColorVolumeWeight;

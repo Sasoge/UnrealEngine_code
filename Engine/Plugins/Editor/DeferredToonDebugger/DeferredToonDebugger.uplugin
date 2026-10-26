@@ -1,0 +1,17 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "1.0",
+    "FriendlyName": "Toon Lighting Debugger",
+    "Description": "Dockable, non-destructive lighting buffer previews for Deferred Toon Volumes.",
+    "Category": "Editor",
+    "EnabledByDefault": true,
+    "CanContainContent": false,
+    "Modules": [
+        {
+            "Name": "DeferredToonDebugger",
+            "Type": "Editor",
+            "LoadingPhase": "PostEngineInit"
+        }
+    ]
+}

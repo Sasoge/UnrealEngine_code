@@ -19,6 +19,8 @@ struct FDeferredToonVolumePassInputs
 // pre-tonemap volume pass.  Post-processing uses it to present the debug image
 // at the final view-family resolution, matching UE's buffer visualization path.
 RENDERER_API int32 GetDeferredToonVolumeDebugView();
+// Per-view temporary preview can override the CVar without affecting other worlds/captures.
+RENDERER_API bool ShouldPresentDeferredToonDebugView(const FViewInfo& View);
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(
 	FRDGBuilder& GraphBuilder,

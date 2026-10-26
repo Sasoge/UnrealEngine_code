@@ -2164,7 +2164,7 @@ void AddPostProcessingPasses(
 	// assigned after the pre-bloom chain, while later stages only generate bloom
 	// side buffers; using it here bypasses TAA/TSR treatment of the intermediate
 	// debug image.
-	if (GetDeferredToonVolumeDebugView() != 0 && SceneColorBeforeTonemapSlice.IsValid() && ViewFamilyOutput.IsValid())
+	if (ShouldPresentDeferredToonDebugView(View) && SceneColorBeforeTonemapSlice.IsValid() && ViewFamilyOutput.IsValid())
 	{
 		AddDrawTexturePass(GraphBuilder, View, SceneColorBeforeTonemapSlice, ViewFamilyOutput);
 		SceneColor = FScreenPassTexture(ViewFamilyOutput);
