@@ -2,7 +2,6 @@
 
 #include "DeferredToonVolumeSceneProxy.h"
 #include "DeferredToonDebugViews.h"
-#include "DeferredToonDebugPreview.h"
 #include "Engine/DeferredToonInputRegistry.h"
 #include "DataDrivenShaderPlatformInfo.h"
 #include "GlobalRenderResources.h"
@@ -395,29 +394,6 @@ namespace
 		}
 	}
 
-    // Resolve only in a scene containing the exact target component. Other editor worlds,
-    // PIE duplicates, thumbnails and scene/reflection captures must not inherit the preview.
-    static DeferredToonDebugPreview::FState ResolvePreview(
-        const FViewInfo& View, const TArray<FDeferredToonVolumeSceneProxy*>& Volumes)
-    {
-        const auto& State = DeferredToonDebugPreview::Get_RenderThread();
-        if (!View.bIsSceneCapture && !View.bIsReflectionCapture && State.bActive)
-        {
-            for (const auto* Volume : Volumes)
-            {
-                if (Volume && State.Matches(Volume->DebugPreviewKey)) { return State; }
-            }
-        }
-        return {};
-    }
-
-    static uint32 ResolveDebugView(const FDeferredToonVolumeSceneProxy& Volume,
-        const DeferredToonDebugPreview::FState& Preview)
-    {
-        if (Preview.bActive) { return uint32(Preview.ShaderId); }
-        return Volume.DebugView == 255u ? uint32(GetDeferredToonVolumeDebugView()) : FMath::Min<uint32>(Volume.DebugView, 44u);
-    }
-
 	static FScreenPassTextureSlice AddVolumePass(
 		FRDGBuilder& GraphBuilder,
 		const FViewInfo& View,
@@ -425,12 +401,15 @@ namespace
 		const FScreenPassTexture& OriginalSceneColor,
 		const FDeferredToonVolumeSceneProxy& Volume,
         const FDeferredToonAOTextures& SharedAO,
-        const DeferredToonDebugPreview::FState& Preview,
 		TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures)
 	{
 		const FScreenPassTexture Input = FScreenPassTexture::CopyFromSlice(GraphBuilder, SceneColor);
 		const FScreenPassTextureViewport InputViewport(Input);
-        const uint32 DebugView = ResolveDebugView(Volume, Preview);
+		// [DeferredToon] The details-panel selector is a per-volume remote
+		// control.  255 preserves the legacy global console variable path.
+		const uint32 DebugView = Volume.DebugView == 255u
+			? uint32(GetDeferredToonVolumeDebugView())
+			: FMath::Min<uint32>(Volume.DebugView, 44u); // [DeferredToon] Band preview appended; existing IDs preserved.
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial
@@ -549,7 +528,7 @@ namespace
         PassParameters->AOMaskTexture = HardMask ? HardMask : GSystemTextures.GetBlackDummy(GraphBuilder);
         PassParameters->AOMomentsTexture = VolumeAO.Moments ? VolumeAO.Moments : GSystemTextures.GetBlackDummy(GraphBuilder);
         PassParameters->AOGeometryTexture = SharedAO.Geometry ? SharedAO.Geometry : GSystemTextures.GetBlackDummy(GraphBuilder);
-        PassParameters->AOFilterDebug = Preview.bActive ? Preview.AOFilterMode : FMath::Clamp(CVarDeferredToonAOFilterDebug.GetValueOnRenderThread(), 0, 5);
+        PassParameters->AOFilterDebug = FMath::Clamp(CVarDeferredToonAOFilterDebug.GetValueOnRenderThread(), 0, 5);
         PassParameters->bUnifiedIndirectOcclusion = Volume.bUnifiedIndirectOcclusion ? 1u : 0u; // [DeferredToon]
 		PassParameters->ShadowTextureWeight = Volume.ShadowTextureWeight;
 		PassParameters->ShadowTextureTiling = FVector2f(Volume.ShadowTextureTiling);
@@ -585,18 +564,6 @@ int32 GetDeferredToonVolumeDebugView()
 	return DeferredToonDebugViews::ToShaderId(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread()); // Public console index -> stable shader ID.
 }
 
-bool ShouldPresentDeferredToonDebugView(const FViewInfo& View)
-{
-    if (DeferredToonDebugPreview::Get_RenderThread().bActive && CVarDeferredToonVolumes.GetValueOnRenderThread() > 0 && View.Family->Scene)
-    {
-        TArray<FDeferredToonVolumeSceneProxy*> Volumes;
-        View.Family->Scene->CollectDeferredToonVolumes(FBox(EForceInit::ForceInit), Volumes);
-        const auto Preview = ResolvePreview(View, Volumes);
-        if (Preview.bActive) { return Preview.ShaderId != 0; }
-    }
-    return GetDeferredToonVolumeDebugView() != 0;
-}
-
 FScreenPassTextureSlice AddDeferredToonVolumePass(
 	FRDGBuilder& GraphBuilder,
 	const FViewInfo& View,
@@ -610,13 +577,6 @@ FScreenPassTextureSlice AddDeferredToonVolumePass(
 
 	TArray<FDeferredToonVolumeSceneProxy*> Volumes;
 	Scene->CollectDeferredToonVolumes(FBox(EForceInit::ForceInit), Volumes);
-    const auto Preview = ResolvePreview(View, Volumes);
-    if (Preview.bActive && Preview.ShaderId != 0)
-    {
-        // Diagnostic output is fullscreen. Prevent another overlapping volume from
-        // grading it or replacing it with a different saved debug view.
-        Volumes.RemoveAll([&Preview](const auto* Volume) { return !Preview.Matches(Volume->DebugPreviewKey); });
-    }
 	FScreenPassTextureSlice Current = Inputs.SceneColor;
 	// [DeferredToon] Resolve once, not once per box, to avoid repeated residual subtraction.
 	const FScreenPassTexture OriginalSceneColor = FScreenPassTexture::CopyFromSlice(GraphBuilder, Inputs.SceneColor);
@@ -624,7 +584,7 @@ FScreenPassTextureSlice AddDeferredToonVolumePass(
     FDeferredToonAOTextures SharedAO;
     for (const FDeferredToonVolumeSceneProxy* Volume : Volumes)
     {
-        if (Volume && NeedsHardAO(*Volume, ResolveDebugView(*Volume, Preview)))
+        if (Volume && NeedsHardAO(*Volume, Volume->DebugView == 255u ? uint32(GetDeferredToonVolumeDebugView()) : Volume->DebugView))
         {
             SharedAO = AddAOFilter(GraphBuilder, View, OriginalSceneColor, Inputs.SceneTextures);
             if (SharedAO.Geometry && View.ViewState && !View.bStatePrevViewInfoIsReadOnly
@@ -639,7 +599,7 @@ FScreenPassTextureSlice AddDeferredToonVolumePass(
 	{
 		if (Volume)
 		{
-			Current = AddVolumePass(GraphBuilder, View, Current, OriginalSceneColor, *Volume, SharedAO, Preview, Inputs.SceneTextures);
+			Current = AddVolumePass(GraphBuilder, View, Current, OriginalSceneColor, *Volume, SharedAO, Inputs.SceneTextures);
 		}
 	}
 	return Current;

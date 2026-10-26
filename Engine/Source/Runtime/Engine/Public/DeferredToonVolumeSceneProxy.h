@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/ObjectKey.h"
 #include "Engine/DeferredToonInputRegistry.h"
 #include "Math/Color.h"
 
@@ -43,9 +42,9 @@ public:
     float ToonShadowThreshold = 0.5f;
     FLinearColor ToonLitColor = FLinearColor::White;
     FLinearColor ToonDarkColor = FLinearColor::Black;
-    // [DeferredToon] 255 follows the global console; other values are stable shader IDs.
+    // [DeferredToon] 255 means use the global console variable; values 1-13
+    // are the editor-facing per-volume debug selector.
     uint8 DebugView = 255;
-    FObjectKey DebugPreviewKey; // Identity only: never resolved on the render thread.
     // [DeferredToon] Effective selection and color mapping POD/resources.
     float EffectiveLightThreshold = 0.1f;
     // [DeferredToon] Packed, sorted intervals: minimum, value, texture influence, replace weight.
