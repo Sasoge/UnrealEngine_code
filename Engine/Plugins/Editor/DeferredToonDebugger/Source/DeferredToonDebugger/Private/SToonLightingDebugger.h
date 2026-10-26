@@ -24,7 +24,7 @@ private:
     void Preview(int32 Index);
     void SetTarget(UDeferredToonVolumeComponent* Component);
     void FollowSelection();
-    void SetRealtime(bool bEnable);
+    void RefreshViewportDisplay();
     void SavePreferences();
     void OnMapChange(uint32 Flags);
     void OnBeginPIE(bool bSimulating);

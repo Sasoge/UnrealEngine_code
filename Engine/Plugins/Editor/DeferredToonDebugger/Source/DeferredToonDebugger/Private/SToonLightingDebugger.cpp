@@ -26,7 +26,6 @@
 namespace
 {
 const TCHAR* ConfigSection = TEXT("DeferredToon.Debugger");
-FText RealtimeName(uint64 OwnerId) { return FText::FromString(FString::Printf(TEXT("Toon Lighting Debugger %llu"), OwnerId)); }
 const DeferredToonDebugViews::FEntry* FindView(int32 Index)
 {
     for (const auto& Entry : DeferredToonDebugViews::Entries)
@@ -82,26 +81,27 @@ bool SToonLightingDebugger::CanPreview() const
         && C->IsRegistered() && C->bEnabled;
 }
 
-void SToonLightingDebugger::SetRealtime(bool bEnable)
+void SToonLightingDebugger::RefreshViewportDisplay()
 {
-    if (!GEditor) { return; }
+    if (!GEditor || !Target.IsValid()) { return; }
     for (FLevelEditorViewportClient* Client : GEditor->GetLevelViewportClients())
     {
-        if (!Client) { continue; }
-        if (bEnable && Target.IsValid() && Client->GetWorld() == Target->GetWorld())
+        if (Client && Client->GetWorld() == Target->GetWorld())
         {
-            if (!Client->HasRealtimeOverride(RealtimeName(OwnerId))) { Client->AddRealtimeOverride(true, RealtimeName(OwnerId)); }
+            // Preview only changes display pixels. Invalidating hit proxies forces
+            // expensive picking renders/readbacks when the mouse next queries them.
+            // Preserve the user's realtime settings, including inactive viewports.
+            Client->Invalidate(false, false);
         }
-        else { Client->RemoveRealtimeOverride(RealtimeName(OwnerId), false); }
-        Client->Invalidate();
     }
 }
 
 void SToonLightingDebugger::StopPreview()
 {
+    if (!bPreviewActive) { return; }
     bPreviewActive = false;
     DeferredToonDebugPreview::Clear(OwnerId);
-    SetRealtime(false);
+    RefreshViewportDisplay();
 }
 
 void SToonLightingDebugger::RefreshPreview()
@@ -109,7 +109,7 @@ void SToonLightingDebugger::RefreshPreview()
     if (bPreviewActive && CanPreview())
     {
         DeferredToonDebugPreview::Set(OwnerId, Target.Get(), CurrentIndex, AOFilterMode);
-        SetRealtime(true);
+        RefreshViewportDisplay();
     }
 }
 
@@ -151,7 +151,7 @@ void SToonLightingDebugger::Tick(const FGeometry& Geometry, double Time, float D
     if (bPreviewActive && !CanPreview()) { StopPreview(); }
     if (Target.IsValid() && GEditor && Target->GetWorld() != GEditor->GetEditorWorldContext().World()) { Target.Reset(); }
     if (bFollowSelection) { FollowSelection(); }
-    if (bPreviewActive) { SetRealtime(true); }
+    // Idle polling must not redraw viewports or invalidate picking caches.
 }
 
 void SToonLightingDebugger::OnMapChange(uint32 Flags) { StopPreview(); Target.Reset(); PreviousIndex = -1; }

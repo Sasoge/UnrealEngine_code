@@ -2,6 +2,7 @@
 #include "Components/DeferredToonVolumeComponent.h"
 #include "DeferredToonDebugPreview.h"
 #include "Editor.h"
+#include "LevelEditorViewport.h"
 #include "EngineUtils.h"
 #include "Engine/Selection.h"
 #include "Misc/AutomationTest.h"
@@ -47,7 +48,32 @@ bool FToonDebuggerPanelTest::RunTest(const FString& Parameters)
     Panel->bFollowSelection = false;
     Panel->SetTarget(Target);
     TestTrue(TEXT("Target is usable"), Panel->CanPreview());
+    // A paused viewport catches accidental force-realtime regressions even when
+    // every viewport in the test map normally uses realtime rendering.
+    const FText TestRealtimeOwner = FText::FromString(TEXT("Toon debugger realtime regression test"));
+    FLevelEditorViewportClient* PausedClient = nullptr;
+    for (auto* Client : GEditor->GetLevelViewportClients())
+    {
+        if (Client && Client->GetWorld() == Target->GetWorld())
+        {
+            PausedClient = Client;
+            Client->AddRealtimeOverride(false, TestRealtimeOwner);
+            break;
+        }
+    }
+    TestNotNull(TEXT("Target scene viewport exists"), PausedClient);
+    TArray<TPair<FLevelEditorViewportClient*, bool>> RealtimeStates;
+    for (auto* Client : GEditor->GetLevelViewportClients())
+    {
+        if (Client) { RealtimeStates.Emplace(Client, Client->IsRealtime()); }
+    }
+    TestTrue(TEXT("Editor viewport available for realtime preservation check"), !RealtimeStates.IsEmpty());
     Panel->Preview(80);
+    Panel->Tick(FGeometry(), FPlatformTime::Seconds(), 0.3f);
+    for (const auto& State : RealtimeStates)
+    {
+        TestEqual(TEXT("Preview and idle tick preserve viewport realtime"), State.Key->IsRealtime(), State.Value);
+    }
     TestTrue(TEXT("Panel locks the exact component"), Read().Matches(FObjectKey(Target)));
     TestEqual(TEXT("Reflection route"), Read().ShaderId, 41);
     Panel->Preview(51);
@@ -103,6 +129,11 @@ bool FToonDebuggerPanelTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Map dirtiness unchanged"), Target->GetOutermost()->IsDirty(), bWasDirty);
     TestEqual(TEXT("Global view unchanged"), CVar->GetInt(), SavedCVar);
     TestEqual(TEXT("Global AO unchanged"), AOVar->GetInt(), SavedAO);
+    for (const auto& State : RealtimeStates)
+    {
+        TestEqual(TEXT("Release preserves viewport realtime"), State.Key->IsRealtime(), State.Value);
+    }
+    if (PausedClient) { PausedClient->RemoveRealtimeOverride(TestRealtimeOwner, false); }
     BeginCleanup(WidgetRenderer);
     return true;
 }
