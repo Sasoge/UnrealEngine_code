@@ -302,6 +302,8 @@ namespace
 			SHADER_PARAMETER(uint32, bIndirectDiffuseAvailable)
             SHADER_PARAMETER_RDG_TEXTURE(Texture2D, IndirectSpecularTexture)
             SHADER_PARAMETER(uint32, bIndirectSpecularAvailable)
+            SHADER_PARAMETER(uint32, bOverrideIndirectSpecular)
+            SHADER_PARAMETER(float, IndirectSpecularIntensity)
             // [DeferredToon] Visible direct-specular band controls.
             SHADER_PARAMETER(uint32, bSpecularAvailable)
             SHADER_PARAMETER(uint32, DirectSpecularStyle)
@@ -482,6 +484,8 @@ namespace
         PassParameters->DirectSpecularColorMode = Volume.DirectSpecularColorMode;
         PassParameters->DirectSpecularColor = FVector4f(Volume.DirectSpecularColor);
         PassParameters->DirectSpecularIntensity = Volume.DirectSpecularIntensity;
+        PassParameters->bOverrideIndirectSpecular = Volume.bOverrideIndirectSpecular ? 1u : 0u;
+        PassParameters->IndirectSpecularIntensity = Volume.IndirectSpecularIntensity;
         PassParameters->bOverrideIndirectDiffuse = Volume.bOverrideIndirectDiffuse ? 1u : 0u;
         PassParameters->IndirectDiffuseIntensity = Volume.IndirectDiffuseIntensity;
         PassParameters->IndirectDiffuseColor = FVector4f(Volume.IndirectDiffuseColor.R, Volume.IndirectDiffuseColor.G, Volume.IndirectDiffuseColor.B, 1);

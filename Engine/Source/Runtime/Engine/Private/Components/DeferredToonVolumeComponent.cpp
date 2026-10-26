@@ -263,6 +263,8 @@ void UDeferredToonVolumeComponent::SetDirectSpecularThreshold(float NewValue) { 
 void UDeferredToonVolumeComponent::SetDirectSpecularColorMode(EDeferredToonDirectSpecularColorMode NewValue) { DTOON_SET(DirectSpecularColorMode, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetDirectSpecularColor(FLinearColor NewValue) { DTOON_SET(DirectSpecularColor, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetDirectSpecularIntensity(float NewValue) { DTOON_SET(DirectSpecularIntensity, FMath::Max(NewValue, 0.0f), MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetOverrideIndirectSpecular(bool NewValue) { DTOON_SET(bOverrideIndirectSpecular, NewValue, MarkRenderStateDirty()); }
+void UDeferredToonVolumeComponent::SetIndirectSpecularIntensity(float NewValue) { DTOON_SET(IndirectSpecularIntensity, FMath::IsFinite(NewValue) ? FMath::Max(NewValue, 0.0f) : 1.0f, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetOverrideIndirectDiffuse(bool NewValue) { DTOON_SET(bOverrideIndirectDiffuse, NewValue, MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetIndirectDiffuseIntensity(float NewValue) { DTOON_SET(IndirectDiffuseIntensity, FMath::Max(NewValue, 0.0f), MarkRenderStateDirty()); }
 void UDeferredToonVolumeComponent::SetIndirectDiffuseStyle(EDeferredToonIndirectDiffuseStyle NewValue) { DTOON_SET(IndirectDiffuseStyle, NewValue, MarkRenderStateDirty()); }

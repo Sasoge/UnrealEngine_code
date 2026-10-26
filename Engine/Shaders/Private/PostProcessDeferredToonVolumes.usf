@@ -54,6 +54,8 @@ Texture2D IndirectDiffuseTexture;
 uint bIndirectDiffuseAvailable;
 Texture2D IndirectSpecularTexture;
 uint bIndirectSpecularAvailable;
+uint bOverrideIndirectSpecular;
+float IndirectSpecularIntensity;
 uint bOverrideIndirectDiffuse;
 uint IndirectDiffuseStyle;
 float IndirectDiffuseThreshold;
@@ -790,7 +792,16 @@ void MainPS(
             // budget. Native opt-out preserves the old residual path exactly.
             const bool bStyleSpecular = DirectSpecularStyle == 1u && bSpecularAvailable != 0u;
             const float3 ExtractedSpecular = bStyleSpecular ? min(VisibleSpecular * PrimaryView.PreExposure, OriginalResidual) : 0.0f;
-            const float3 Residual = OriginalResidual - ExtractedSpecular;
+            // Reserve the independent environment layer before diffuse/AO grading.
+            // Both inputs are already pre-exposed; do not apply exposure or F0 again.
+            const float4 EnvironmentSample = IndirectSpecularTexture.SampleLevel(GlobalPointClampedSampler, UV, 0);
+            const bool bAdjustEnvironment = bOverrideIndirectSpecular != 0u
+                && bIndirectSpecularAvailable != 0u && EnvironmentSample.a > 0.5f;
+            const float3 RemainingAfterDirect = OriginalResidual - ExtractedSpecular;
+            const float3 ExtractedEnvironment = bAdjustEnvironment
+                ? min(max(EnvironmentSample.rgb, 0.0f), RemainingAfterDirect) : 0.0f;
+            const float3 EnvironmentContribution = ExtractedEnvironment * max(IndirectSpecularIntensity, 0.0f);
+            const float3 Residual = RemainingAfterDirect - ExtractedEnvironment;
             float3 OtherContribution = Residual * saturate(OtherLightingWeight);
             if (bValidIndirect && (bOverrideIndirectDiffuse != 0u || (bUnifiedIndirectOcclusion != 0u && Occlusion.Source != 0u)))
             {
@@ -829,7 +840,7 @@ void MainPS(
                 GradedIndirect *= ResolveDeferredToonFinalAO(Occlusion);
                 OtherContribution = GradedIndirect + (Residual - ExtractedIndirect) * saturate(OtherLightingWeight);
             }
-            OutputColor = lerp(SceneColor.rgb, GradedDirect + OtherContribution + (bStyleSpecular ? StyledSpecular : 0.0f), Weight);
+            OutputColor = lerp(SceneColor.rgb, GradedDirect + OtherContribution + EnvironmentContribution + (bStyleSpecular ? StyledSpecular : 0.0f), Weight);
         }
 		OutColor = float4(OutputColor, SceneColor.a);
 	}

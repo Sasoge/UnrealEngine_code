@@ -221,8 +221,15 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Palette", meta=(ClampMin="0.0", ClampMax="1.0", EditConditionHides, DisplayName="Shadow Color Replacement", DisplayPriority="4", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", ToolTip="0 tints original direct diffuse; 1 replaces it with the target color, even in fully dark regions. Intermediate bands interpolate the shadow/light replacement amounts by their Level."))
     float ShadowColorReplaceWeight = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Output", meta=(ClampMin="0.0", ClampMax="1.0", EditConditionHides, DisplayName="Keep Other Lighting", DisplayPriority="3", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", ToolTip="0 keeps only processed direct diffuse; 1 also retains the original scene residual (including indirect light and specular). With Adjust Indirect Diffuse enabled, extracted indirect has separate controls. Hard Single Band direct specular also uses its independent intensity. This can change the visible palette colors."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Output", meta=(ClampMin="0.0", ClampMax="1.0", EditConditionHides, DisplayName="Keep Other Lighting", DisplayPriority="3", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", ToolTip="Weights only lighting not controlled separately. Independent indirect diffuse, environment reflections and Hard Single Band direct specular use their own controls even at zero. At one, remaining native lighting is retained. This can change the visible palette colors."))
     float OtherLightingWeight = 1.0f;
+
+    // [DeferredToon] Opt-in preserves old assets and exposes reflections independently.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Reflections", meta=(DisplayName="Adjust Environment Reflections Separately", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Extract supported native indirect specular from Other Lighting and control it independently. Works with Keep Other Lighting at zero. Missing exports retain the original residual behavior; view 42 shows availability. Does not enable reflections on materials where the native shader suppresses them."))
+    bool bOverrideIndirectSpecular = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Reflections", meta=(DisplayName="Reflection Intensity", ClampMin="0.0", UIMax="4.0", EditCondition="bOverrideIndirectSpecular && OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="0 removes the extracted environment reflection; 1 preserves its native contribution. Independent of indirect diffuse, its AO controls and Keep Other Lighting. Native material/F0 and reflected colors are preserved. UE exposure and tonemapping still apply."))
+    float IndirectSpecularIntensity = 1.0f;
 
     // [DeferredToon] Native is opt-out: existing assets retain the original residual.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Toon Specular", meta=(DisplayName="Highlight Style", EditCondition="OutputMode == EDeferredToonVolumeOutputMode::DirectLightGrade", EditConditionHides, ToolTip="Native preserves existing direct specular in Other Lighting. Hard Single Band replaces only the visible direct-specular contribution with a hard luminance band and the selected color source inside its mask. Environment/Lumen reflections are separate."))
@@ -365,6 +372,8 @@ public:
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectSpecularColorMode(EDeferredToonDirectSpecularColorMode NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectSpecularColor(FLinearColor NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetDirectSpecularIntensity(float NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOverrideIndirectSpecular(bool NewValue);
+    UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectSpecularIntensity(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetOverrideIndirectDiffuse(bool NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseIntensity(float NewValue);
     UFUNCTION(BlueprintCallable, Category="Deferred Toon Volume") ENGINE_API void SetIndirectDiffuseStyle(EDeferredToonIndirectDiffuseStyle NewValue);

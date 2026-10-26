@@ -62,6 +62,8 @@ public:
     FLinearColor DirectSpecularColor = FLinearColor::White;
     float DirectSpecularIntensity = 1.0f;
     // [DeferredToon] Optional independent indirect diffuse grade.
+    bool bOverrideIndirectSpecular = false;
+    float IndirectSpecularIntensity = 1.0f;
     bool bOverrideIndirectDiffuse = false;
     uint8 IndirectDiffuseStyle = 0;
     float IndirectDiffuseThreshold = 0.1f;
