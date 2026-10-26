@@ -1,5 +1,7 @@
 # Lumen 短程 AO 独立控制（第一阶段）
 
+> 调试编号说明（2026-10-26）：本文保留当时的旧编号，运行命令和界面请按[新版索引对照表](deferred-toon-debug-view-indices.md)换算；`AOFilterDebug` 子模式编号不变。
+
 2026-10-17 面板更新：日常控制现已并入 [间接漫反射遮蔽统一入口](deferred-toon-unified-occlusion.md)。本文的数据范围、原始调试视图和限制继续有效；旧分路参数在兼容模式的高级设置中保留。
 
 日期：2026-10-16。承接[间接漫反射](deferred-toon-indirect-diffuse.md)和[天光遮蔽](deferred-toon-sky-occlusion.md)。本次只增加 Lumen 独立短程漫反射 AO 的预览、强度控制。默认不启用，不改变已有资产效果；没有新增颜色、纹理槽或自定义时序历史。

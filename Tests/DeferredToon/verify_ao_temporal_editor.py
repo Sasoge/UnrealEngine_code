@@ -90,8 +90,8 @@ phases = [
     ('tsr-accepted', 2, lambda: debug(4), False),
     ('tsr-static-off', 24, lambda: (debug(0), hysteresis(0)), False),
     ('tsr-static-on', 24, lambda: hysteresis(.04), False),
-    ('sky-provider', 2, lambda: (sky_only(), debug(0), cmd('r.Toon.DeferredVolumes.DebugView 36')), False),
-    ('sky-accepted', 2, lambda: (cmd('r.Toon.DeferredVolumes.DebugView 38'), debug(4)), False),
+    ('sky-provider', 2, lambda: (sky_only(), debug(0), cmd('r.Toon.DeferredVolumes.DebugView 54')), False),
+    ('sky-accepted', 2, lambda: (cmd('r.Toon.DeferredVolumes.DebugView 51'), debug(4)), False),
     ('sky-hard', 4, lambda: debug(0), False),
 ]
 
@@ -128,7 +128,7 @@ def tick(delta):
             pc.set_view_target_with_blend(camera, 0)
             for s in ['r.AntiAliasingMethod 0', 'r.ScreenPercentage 100', 'Toon.Test.ViewportSize 960 720',
                       'ShowFlag.Tonemapper 0', 'ShowFlag.Bloom 0', 'ShowFlag.MotionBlur 0', 'r.EyeAdaptation.PreExposureOverride 1',
-                      'r.Toon.DeferredVolumes.DebugView 38', 'r.Toon.DeferredVolumes.AOFilterDebug 0',
+                      'r.Toon.DeferredVolumes.DebugView 51', 'r.Toon.DeferredVolumes.AOFilterDebug 0',
                       't.IdleWhenNotForeground 0', 'r.Toon.DeferredVolumes.AOFilterRadius 8']:
                 cmd(s)
             unreal.log('AO_TEMPORAL_PIE: ' + str(position) + ' ' + str(rotation))

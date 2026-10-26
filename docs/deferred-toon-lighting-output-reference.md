@@ -1,6 +1,6 @@
 # 盒体光照独立输出总览：来源、提取与合成
 
-更新：2026-10-26。代码基线：`e5bbb06`（材质自发光拆分）。本文记录当前实现，不把规划中的拆分或历史方案当成现有能力。
+更新：2026-10-26。光照代码基线：`e5bbb06`（材质自发光拆分）；本文调试编号已更新为分组后的公开索引，见[完整索引与旧编号对照](deferred-toon-debug-view-indices.md)。本文记录当前实现，不把规划中的拆分或历史方案当成现有能力。
 
 本文中的“原生结果”指**当前修改版引擎实际参与渲染的结果**，包含已有的 Toon Shading Model、Shadow Channel 等改动，不等于未经修改的 Epic 引擎。
 
@@ -16,20 +16,20 @@
 
 | 部分 | 当前物理资源／通道 | 来源 Pass 与提取点 | 获取方式 | 调试视图 |
 |---|---|---|---|---|
-| 有效直接漫反射 | `EffectiveLightBuffer.rgb` | 延迟逐灯光照，`VisibleLighting.DiffuseLighting` | 复用原生遮挡后积分，MRT 逐灯加法累积 | 22 |
-| 材质无关的有效受光响应 | `EffectiveLightBuffer.a` | 同一逐灯 Pass，`GetDeferredToonEffectiveResponse` | 额外评估单位白参考表面，取亮度并逐灯相加 | 23；24 为加工后的档位 |
-| 未遮挡直接漫反射 | `LightingBuffer.rgb` | 同一逐灯 Pass，`UnshadowedLighting.DiffuseLighting` | 中和阴影输入后额外计算，MRT 加法累积 | 4 |
-| 原生直接光遮挡诊断 | `ShadowBuffer.r` | 同一逐灯 Pass，`GetShadowTerms` | 导出遮挡量，逐灯累积 | 5 |
-| 艺术减法阴影 | `LightingBuffer.a` | 同一逐灯 Pass，Shadow Channel 分支 | 接收通道、曲线、强度处理后的独立遮罩 | 6 |
-| 直接镜面高光 | `SpecularBuffer.rgb` | 同一逐灯 Pass，`VisibleLighting.SpecularLighting` | 复用原生遮挡后镜面积分，MRT 加法累积 | 18；39/40 为风格化诊断 |
-| 表面朝向诊断 | `SpecularBuffer.a` | 同一逐灯 Pass，`GetDeferredToonFacing` | 有效光源范围内的 `saturate(N·L)`，跨灯取最大值 | 21 |
-| Lumen 间接漫反射 | `ToonIndirectDiffuse.rgb/a` | `DiffuseIndirectComposite`，`IndirectLighting.Diffuse` | 原生合成阶段写独立 UAV；A 为有效性 | 25/26 |
-| 普通动态天光漫反射 | 同一张 `ToonIndirectDiffuse` | `ReflectionEnvironmentAndSky`，`SkyLightDiffuse` 的最终结果 | 另一条提供路径写同一接口；不含该 Pass 的镜面部分 | 25/26 |
-| 普通天光 AO 前漫反射＋综合遮蔽 | `ToonSkyDiffuseBeforeAO.rgb/a` | `SkyLightDiffuse` 的可选输出，在 `ReflectionEnvironmentAndSky` 导出 | RGB 保存去局部 AO 的天光，A 保存综合可见度 | 27/28/29 |
-| Lumen 短程 AO 前漫反射＋短程遮蔽 | `ToonLumenDiffuseBeforeShortAO.rgb/a` | `DiffuseIndirectComposite` 的短程 AO 应用位置 | RGB 在乘 AO 前保存，A 解码原生 `ShortRangeAOTexture` | 31/30/32 |
-| 环境镜面反射 | `ToonIndirectSpecular.rgb/a` | Lumen 合成中的 `IndirectLighting.Specular`，或 `ReflectionEnvironmentAndSky` 中的 `ReflectionEnvironment(...)` | 按实际渲染路径导出最终镜面分量，写 UAV | 41/42 |
-| 材质自发光 | `ToonEmissive.rgb/a` | Base Pass，`GetMaterialEmissive(PixelMaterialInputs)` | 附加 MRT，继承原生深度／遮罩覆盖；A 为有效性 | 43/44 |
-| 自动综合遮蔽与二分 AO | 复用上述 AO 输入；另有自定义滤波／历史纹理 | `DeferredToon AO Stage ...`、`DeferredToonVolume` | 选择有效提供方，再滤波、时域处理和二分 | 33～38 |
+| 有效直接漫反射 | `EffectiveLightBuffer.rgb` | 延迟逐灯光照，`VisibleLighting.DiffuseLighting` | 复用原生遮挡后积分，MRT 逐灯加法累积 | 20 |
+| 材质无关的有效受光响应 | `EffectiveLightBuffer.a` | 同一逐灯 Pass，`GetDeferredToonEffectiveResponse` | 额外评估单位白参考表面，取亮度并逐灯相加 | 21；22 为加工后的档位 |
+| 未遮挡直接漫反射 | `LightingBuffer.rgb` | 同一逐灯 Pass，`UnshadowedLighting.DiffuseLighting` | 中和阴影输入后额外计算，MRT 加法累积 | 26 |
+| 原生直接光遮挡诊断 | `ShadowBuffer.r` | 同一逐灯 Pass，`GetShadowTerms` | 导出遮挡量，逐灯累积 | 100 |
+| 艺术减法阴影 | `LightingBuffer.a` | 同一逐灯 Pass，Shadow Channel 分支 | 接收通道、曲线、强度处理后的独立遮罩 | 101 |
+| 直接镜面高光 | `SpecularBuffer.rgb` | 同一逐灯 Pass，`VisibleLighting.SpecularLighting` | 复用原生遮挡后镜面积分，MRT 加法累积 | 30；31/32 为风格化诊断 |
+| 表面朝向诊断 | `SpecularBuffer.a` | 同一逐灯 Pass，`GetDeferredToonFacing` | 有效光源范围内的 `saturate(N·L)`，跨灯取最大值 | 27 |
+| Lumen 间接漫反射 | `ToonIndirectDiffuse.rgb/a` | `DiffuseIndirectComposite`，`IndirectLighting.Diffuse` | 原生合成阶段写独立 UAV；A 为有效性 | 40/41 |
+| 普通动态天光漫反射 | 同一张 `ToonIndirectDiffuse` | `ReflectionEnvironmentAndSky`，`SkyLightDiffuse` 的最终结果 | 另一条提供路径写同一接口；不含该 Pass 的镜面部分 | 40/41 |
+| 普通天光 AO 前漫反射＋综合遮蔽 | `ToonSkyDiffuseBeforeAO.rgb/a` | `SkyLightDiffuse` 的可选输出，在 `ReflectionEnvironmentAndSky` 导出 | RGB 保存去局部 AO 的天光，A 保存综合可见度 | 60/61/62 |
+| Lumen 短程 AO 前漫反射＋短程遮蔽 | `ToonLumenDiffuseBeforeShortAO.rgb/a` | `DiffuseIndirectComposite` 的短程 AO 应用位置 | RGB 在乘 AO 前保存，A 解码原生 `ShortRangeAOTexture` | 70/71/72 |
+| 环境镜面反射 | `ToonIndirectSpecular.rgb/a` | Lumen 合成中的 `IndirectLighting.Specular`，或 `ReflectionEnvironmentAndSky` 中的 `ReflectionEnvironment(...)` | 按实际渲染路径导出最终镜面分量，写 UAV | 80/81 |
+| 材质自发光 | `ToonEmissive.rgb/a` | Base Pass，`GetMaterialEmissive(PixelMaterialInputs)` | 附加 MRT，继承原生深度／遮罩覆盖；A 为有效性 | 90/91 |
+| 自动综合遮蔽与二分 AO | 复用上述 AO 输入；另有自定义滤波／历史纹理 | `DeferredToon AO Stage ...`、`DeferredToonVolume` | 选择有效提供方，再滤波、时域处理和二分 | 50～54、42 |
 
 上表的资源均指 `FSceneTextures` 中的自定义资源，最后一行除外。`ShadowBuffer`、`EffectiveLightBuffer` 等名称不是 UE 原本就提供的标准光照分层。
 
@@ -88,7 +88,7 @@ Lumen 间接合成 ──────────────────→ 间
 
 因此它不依赖真实材质的底色、金属度、粗糙度，也不通过除以底色恢复光照；**仍依赖法线、灯光强度／颜色、衰减、光源形状和遮挡**。它不是纯 `N·L`，不是严格物理照度单位，也不保证落在 0～1。原生材质响应复用已有计算，参考表面计算则有额外成本。
 
-盒体以去预曝光后的 A 做二分或多档选择。23 的显示采用压缩映射，不能把截图灰度直接当作原始受光数值；24 是选择后的档位值，也不是新光照层。14、19、20 是二分参考／派生遮罩，不能代替当前多档颜色结果。
+盒体以去预曝光后的 A 做二分或多档选择。21 的显示采用压缩映射，不能把截图灰度直接当作原始受光数值；22 是选择后的档位值，也不是新光照层。23、24、25 是二分参考／派生遮罩，不能代替当前多档颜色结果。
 
 ### 3.3 未遮挡直接漫反射与纯朝向
 
@@ -117,7 +117,7 @@ Lumen 间接合成 ──────────────────→ 间
 
 当前硬边单档风格化在盒体中对去预曝光的有效高光亮度做阈值选择，颜色可保留原生 RGB 比例并染色，也可使用固定替换色。材质中的细碎法线、粗糙度等变化已经进入原生高光，二分会把阈值附近的细节放大成颗粒；本阶段没有自动重建风格化法线。
 
-18 显示原生直接高光，39 显示硬边选区，40 显示加工后的高光。只有启用硬边模式时，它才从“其他光照”中独立扣出并加回；选择原生模式时仍按剩余贡献的原规则保留。
+30 显示原生直接高光，31 显示硬边选区，32 显示加工后的高光。只有启用硬边模式时，它才从“其他光照”中独立扣出并加回；选择原生模式时仍按剩余贡献的原规则保留。
 
 ## 5. 间接漫反射：两条提供路径
 
@@ -137,7 +137,7 @@ CPU 在 `RenderDiffuseIndirectAndAmbientOcclusion` 中，为正常 Lumen 合成�
 
 RGB 是预曝光颜色，A=1 表示有效，A=0 表示未提供。需要后续独立散射的 SSS 被排除；材质有效性和各分支检查以代码为准，不能仅因为 RT 已分配就判断每个像素可用。
 
-目前不完整覆盖独立 SSGI、Lightmap、Volumetric Lightmap、Indirect Lighting Cache、Ambient Cubemap 等来源。即便这些效果在最终画面中存在，也不能宣称它们都在视图 25 中。透明／水等专用路径也不是这个接口的完整承诺。
+目前不完整覆盖独立 SSGI、Lightmap、Volumetric Lightmap、Indirect Lighting Cache、Ambient Cubemap 等来源。即便这些效果在最终画面中存在，也不能宣称它们都在视图 40 中。透明／水等专用路径也不是这个接口的完整承诺。
 
 这里没有自定义跨帧累计；读取的 Lumen 结果本身可能已经经过其原生空间／时间处理。之后的盒体 AO 历史是另一套处理。
 
@@ -171,14 +171,14 @@ RGB 是预曝光颜色，A=1 表示有效，A=0 表示未提供。需要后续�
 
 | 视图 | 含义 |
 |---|---|
-| 33 | 自动选择的原始可见度；不可用时也可能显示中性白，应同时看 35 |
-| 34 | 选中提供方的 AO 前漫反射 |
-| 35 | 提供方数据有效性 |
-| 36 | 青=Lumen，橙=普通天光，黑=无数据 |
-| 37 | 整层间接光的二分选区，不是 AO 二分 |
-| 38 | 经自定义处理后的 AO 二分遮罩，白为无遮挡 |
+| 50 | 自动选择的原始可见度；不可用时也可能显示中性白，应同时看 53 |
+| 52 | 选中提供方的 AO 前漫反射 |
+| 53 | 提供方数据有效性 |
+| 54 | 青=Lumen，橙=普通天光，黑=无数据 |
+| 42 | 整层间接光的二分选区，不是 AO 二分 |
+| 51 | 经自定义处理后的 AO 二分遮罩，白为无遮挡 |
 
-`DeferredToonAOFilter.usf` 与 C++ 调度负责空间过滤、同表面检查、连续可见度历史、重投影、二分滞回及暗部连续确认。原始 33 不会被这些历史处理改写；38 才是加工后的结果。处理使用自己的临时和历史纹理，不修改 UE 原生 AO 算法。
+`DeferredToonAOFilter.usf` 与 C++ 调度负责空间过滤、同表面检查、连续可见度历史、重投影、二分滞回及暗部连续确认。原始 50 不会被这些历史处理改写；51 才是加工后的结果。处理使用自己的临时和历史纹理，不修改 UE 原生 AO 算法。
 
 当前二分 AO 的合成顺序是：**恢复所保存的 AO 前漫反射 → 间接光调色／分档 → 应用二分 AO → 与其他层组合**。不能在已受原生 AO 影响的颜色上再乘一次二分 AO，也不能先乘完 AO 再用固定色把暗部填回去。它只调整间接漫反射，不压暗直接光、镜面反射或自发光。
 
@@ -186,7 +186,7 @@ RGB 是预曝光颜色，A=1 表示有效，A=0 表示未提供。需要后续�
 
 ### 6.4 屏幕 AO 和材质 AO 的位置
 
-视图 9 直接读取原生 `SceneTexturesStruct.ScreenSpaceAOTexture`，没有为它新建另一张独立 AO RT。它不是 Lumen 短程 AO 的同义词，Lumen 路径下可能没有这张屏幕 AO 的有效信息。
+视图 55 直接读取原生 `SceneTexturesStruct.ScreenSpaceAOTexture`，没有为它新建另一张独立 AO RT。它不是 Lumen 短程 AO 的同义词，Lumen 路径下可能没有这张屏幕 AO 的有效信息。
 
 材质 AO 是 GBuffer／原生材质输入的一部分，目前没有一套独立的材质 AO RGB 光照层。它是否进入某张综合遮蔽，应按提供路径判断：普通天光合并逻辑会使用 `GBufferAO`，Lumen 短程 AO 导出的 A 则取自 `ShortRangeAOTexture`，不能称作完整材质 AO 汇总。
 
@@ -199,9 +199,9 @@ RGB 是预曝光颜色，A=1 表示有效，A=0 表示未提供。需要后续�
 
 分别写入 `ToonIndirectSpecular`，由实际渲染路径选择提供方。普通反射导出不要求动态 SkyLight 存在，所以移除天光后仍可有 SSR。这里没有进一步把 SSR、反射捕获、粗糙反射等分别导出；它们仍是一份最终环境镜面贡献。
 
-RGB 是预曝光颜色，A 是有效性。当前自定义 `SHADINGMODELID_TOON` 的 Lumen 镜面屏蔽保留在导出之前：可以出现“41 黑、42 白”，表示有效的零贡献，而不是导出丢失。独立强度开关不能恢复原生材质路径主动屏蔽的反射。
+RGB 是预曝光颜色，A 是有效性。当前自定义 `SHADINGMODELID_TOON` 的 Lumen 镜面屏蔽保留在导出之前：可以出现“80 黑、81 白”，表示有效的零贡献，而不是导出丢失。独立强度开关不能恢复原生材质路径主动屏蔽的反射。
 
-Hair、需独立散射的 SSS、SingleLayerWater、透明和 Substrate 不作为这层完整支持范围。水面倒影不能仅凭 41 判断是否已完整拆出。
+Hair、需独立散射的 SSS、SingleLayerWater、透明和 Substrate 不作为这层完整支持范围。水面倒影不能仅凭 80 判断是否已完整拆出。
 
 ## 8. 材质自发光
 
@@ -291,12 +291,12 @@ AO 前 RGB 用来重建这一份间接光，不作为额外光照再加一次。
 
 ## 12. 排查与后续维护
 
-1. 先确定实际提供路径：Lumen 还是普通天光；使用 26、29、32、35、36、42、44 检查有效性，不只看 RGB。
+1. 先确定实际提供路径：Lumen 还是普通天光；使用 41、62、72、53、54、81、91 检查有效性，不只看 RGB。
 2. 在 RenderDoc 中定位真实 producer Pass，核对其 UAV／MRT、资源格式、ViewRect、清理和曝光空间，再检查盒体消费。
-3. 直接光先看 22／23，镜面分别看 18 和 41，自发光看 43；不要把镜面倒影归入间接漫反射，也不要把材质亮部当成受光选区。
-4. 原始 AO 看 28／30／33，加工后看 38。时域稳定问题同时检查重投影接受率、提供方切换与历史重置，不只加大模糊。
+3. 直接光先看 20／21，镜面分别看 30 和 80，自发光看 90；不要把镜面倒影归入间接漫反射，也不要把材质亮部当成受光选区。
+4. 原始 AO 看 61／71／50，加工后看 51。时域稳定问题同时检查重投影接受率、提供方切换与历史重置，不只加大模糊。
 5. 新加分量需明确：来源、格式、有效性哨兵、曝光、无输入回退、支持材质、是否需要历史、独立参数默认值，以及从剩余预算中何时扣除。
-6. 保持已有调试编号和序列化语义稳定；面板参数和提示同步中英文。不要因优化重新混合已拆出的漫反射、镜面或自发光。
+6. 保持已发布的公开索引和内部序列化 ID 稳定；两者不同，参见索引表。面板参数和提示同步中英文。不要因优化重新混合已拆出的漫反射、镜面或自发光。
 
 ### 相关专题与验证边界
 

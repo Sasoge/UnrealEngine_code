@@ -1,5 +1,6 @@
-﻿// [DeferredToon] Scoped editor metadata translations. No assets or enum values are changed.
+// [DeferredToon] Scoped editor metadata translations. No assets or enum values are changed.
 #include "DeferredToonDetailsLanguage.h"
+#include "DeferredToonDebugViews.h"
 #include "Internationalization/Internationalization.h"
 #include "Internationalization/Culture.h"
 #include "Misc/ConfigCacheIni.h"
@@ -82,13 +83,13 @@ void Apply(bool bChinese)
         // [DeferredToon] Keep new authoring controls bilingual.
         // [DeferredToon] Compact direct-highlight controls.
         {TEXT("DirectSpecularStyle"), TEXT("高光方式"), TEXT("原生：高光沿用保留其他光照。硬边单档：独立替换实际直接光高光，使用 UE 的阴影、衰减与通道结果。不包含环境反射或 Lumen 反射。")},
-        {TEXT("DirectSpecularThreshold"), TEXT("高光范围阈值"), TEXT("对去预曝光后的实际直接光高光亮度做硬阈值判断。越高范围越小；零光照不会产生高光。不是归一化值，粗糙度、法线、视角及光源仍决定形状。视图 39 查看遮罩。")},
+        {TEXT("DirectSpecularThreshold"), TEXT("高光范围阈值"), TEXT("对去预曝光后的实际直接光高光亮度做硬阈值判断。越高范围越小；零光照不会产生高光。不是归一化值，粗糙度、法线、视角及光源仍决定形状。视图 31 查看遮罩。")},
         {TEXT("DirectSpecularColorMode"), TEXT("高光配色来源"), TEXT("材质与灯光颜色：保留原生有效高光的 RGB 比例，只对亮度分档，包含 F0、菲涅尔与多光源混色。固定颜色替换：只使用指定颜色。两种方式均不改变遮罩。")},
         {TEXT("DirectSpecularColor"), TEXT("高光染色 / 替换色"), TEXT("白色为中性染色：乘在原生高光颜色比例上。固定颜色替换模式下作为输出颜色。原生输入已含材质 F0 和灯光颜色，不再重复相乘。最终仍经过 UE 曝光与色调映射。")},
         {TEXT("DirectSpecularIntensity"), TEXT("高光强度"), TEXT("材质与灯光颜色模式下，控制染色前的单档线性亮度；固定颜色模式下缩放替换色。均不改变选区，0 移除已分离的直接高光。独立于保留其他光照。")},
         {TEXT("bOverrideEmissive"), TEXT("独立调整自发光"), TEXT("将材质自发光从其他光照中分出，保留其他光照为 0 时仍可显示。不透明/遮罩和 Nanite 的传统材质可用，包括 Unlit；不改变材质对 Lumen GI 和倒影的发光贡献。")},
         {TEXT("EmissiveIntensity"), TEXT("自发光强度"), TEXT("0 去除已提取的可见自发光；1 保留原始 HDR 颜色和强度。不重复乘底色或灯光颜色，后续曝光和 Bloom 仍生效。透明、水、天空、Hair、独立 SSS 与 Substrate 暂不支持。")},
-        {TEXT("bOverrideIndirectSpecular"), TEXT("独立调整环境镜面反射"), TEXT("从其他光照中分出支持的原生环境镜面反射，单独控制。保留其他光照为 0 时仍可添加倒影。无有效数据时沿用原合成；视图 42 可检查可用范围。不会恢复原生材质主动屏蔽的反射。")},
+        {TEXT("bOverrideIndirectSpecular"), TEXT("独立调整环境镜面反射"), TEXT("从其他光照中分出支持的原生环境镜面反射，单独控制。保留其他光照为 0 时仍可添加倒影。无有效数据时沿用原合成；视图 81 可检查可用范围。不会恢复原生材质主动屏蔽的反射。")},
         {TEXT("IndirectSpecularIntensity"), TEXT("反射强度"), TEXT("0 去除分离出的环境反射；1 保留原始贡献。不受间接漫反射、漫反射 AO 及保留其他光照参数控制，保留材质/F0 与倒影颜色，仍经过 UE 曝光和色调映射。")},
         {TEXT("bOverrideIndirectDiffuse"), TEXT("独立调整间接漫反射"), TEXT("从其他光照中分出支持的 Lumen 或动态天光漫反射。不改变直接光档位；不支持的像素沿用原合成。")},
         {TEXT("IndirectDiffuseIntensity"), TEXT("强度"), TEXT("1 保留原始强度；0 去除已分离的间接漫反射。")},
@@ -100,7 +101,7 @@ void Apply(bool bChinese)
         {TEXT("IndirectDiffuseDarkColor"), TEXT("暗部颜色"), TEXT("严格二分的固定暗色；上方颜色作为亮色。不乘材质底色，不应用颜色替换或旧天光渐变染色；最终仍经过 UE 曝光与抗锯齿。")},
         {TEXT("IndirectOcclusionMode"), TEXT("遮蔽控制"), TEXT("统一控制会自动选择 Lumen 短程 AO 或普通天光综合遮蔽。原生模式关闭盒体遮蔽调整；旧版分路模式保留旧资产效果。")},
         {TEXT("IndirectOcclusionStrength"), TEXT("遮蔽强度"), TEXT("统一强度模式：1 保留原生 AO。遮蔽二分模式：1 将遮蔽区完全压暗；0 移除当前独立 AO。保留其余 GI 分布，无数据时回退。无需启用间接光调色。遮蔽二分在间接光颜色替换和分档之后生效，只压暗间接漫反射；统一强度仍在调色前调整原生光照。")},
-        {TEXT("IndirectOcclusionThreshold"), TEXT("遮蔽二分阈值"), TEXT("原生 AO 可见度低于阈值时进入遮蔽区，等于阈值为无遮挡。值越高遮蔽区越大。只把 AO 分成两档；先恢复 AO 前间接光，经过调色或分档后再施加遮蔽。视图 38 查看黑白分区。")},
+        {TEXT("IndirectOcclusionThreshold"), TEXT("遮蔽二分阈值"), TEXT("原生 AO 可见度低于阈值时进入遮蔽区，等于阈值为无遮挡。值越高遮蔽区越大。只把 AO 分成两档；先恢复 AO 前间接光，经过调色或分档后再施加遮蔽。视图 51 查看黑白分区。")},
         {TEXT("bOverrideLumenShortRangeAO"), TEXT("独立调整短程 AO"), TEXT("先启用独立调整间接漫反射。仅控制 Lumen 独立短程漫反射遮蔽；保留追踪形成的 GI 暗影、直接光和高光。")},
         {TEXT("LumenShortRangeAOStrength"), TEXT("短程 AO 强度"), TEXT("1 保留原生结果；0 移除独立短程漫反射 AO。无有效数据时保持原结果。间接光颜色替换为 1 时，会覆盖这部分照明差异。")},
         {TEXT("bOverrideSkyOcclusion"), TEXT("独立调整天光遮蔽"), TEXT("先启用独立调整间接漫反射。仅支持普通动态 SkyLight；Lumen 和不支持的像素保持原结果。")},
@@ -109,7 +110,7 @@ void Apply(bool bChinese)
         {TEXT("SkyOcclusionColorReplaceWeight"), TEXT("颜色替换"), TEXT("0 保留间接光调色结果；1 按原生综合遮蔽程度和遮蔽强度混入遮蔽颜色。无遮挡处不变。")},
         {TEXT("OtherLightingWeight"), TEXT("保留其他光照"), TEXT("只控制未单独调整的剩余光照。独立自发光、间接漫反射、环境镜面反射和硬边直接高光使用各自参数，即使此项为 0 仍可显示；1 保留其余原生贡献。这会影响最终看到的色板颜色。")},
         {TEXT("bUseLightBands"), TEXT("启用多档明暗"), TEXT("支持 2～8 档。关闭或不足两档时使用二分阈值。")},
-        {TEXT("EffectiveLightThreshold"), TEXT("二分受光阈值"), TEXT("二分模式的受光分界。多档模式使用每档受光下限；调试视图 14、19、20 仍使用这个二分参考阈值。")},
+        {TEXT("EffectiveLightThreshold"), TEXT("二分受光阈值"), TEXT("二分模式的受光分界。多档模式使用每档受光下限；调试视图 23、24、25 仍使用这个二分参考阈值。")},
         {TEXT("LightBands"), TEXT("明暗档位"), TEXT("前 8 项按受光下限排序；下限相同则后项优先。至少两项。数组标题为“受光下限 / 档位值”。")},
         {TEXT("LightBandColorCurve"), TEXT("多档色板曲线"), TEXT("在各档“档位值”处取色。留空则混合亮暗两条端点曲线；单档自定义颜色优先。")},
         {TEXT("LightingColorCurve"), TEXT("亮部端点曲线"), TEXT("直接光调色和独立重组只取时间 1 的颜色，留空为白色。没有多档色板时用于生成中间档颜色。整体染色模式使用整条曲线。")},
@@ -129,7 +130,7 @@ void Apply(bool bChinese)
         {TEXT("Priority"), TEXT("重叠优先级"), TEXT("数值较大的盒体先收集、先处理；后处理的盒体仍可与之前结果混合。")},
         {TEXT("ObjectID"), TEXT("稳定排序编号"), TEXT("自动生成的稳定编号，用于优先级相同时的排序，不是着色参数。")},
         {TEXT("ToonShadowThreshold"), TEXT("艺术阴影覆盖阈值"), TEXT("独立艺术阴影通道达到该阈值时强制选择暗部，多档模式选择第一档。")},
-        {TEXT("DebugView"), TEXT("缓冲视图预览"), TEXT("局部调试视图。跟随全局使用遥控器或控制台；当前输出显示输出模式结果。24 显示所选明暗档位。")},
+        {TEXT("DebugView"), TEXT("缓冲视图预览"), TEXT("局部调试视图。跟随全局使用遥控器或控制台；当前输出显示输出模式结果。22 显示所选明暗档位。")},
         {TEXT("StyleSource"), TEXT("分层来源"), TEXT("选择风格资产、盒体内的输入层，或停用实验分层。")},
         {TEXT("StyleProfile"), TEXT("分层风格资产"), TEXT("复用数据资产中配置的 RT 输入层，用于实验分层预览。")},
         {TEXT("StyleLayers"), TEXT("输入层列表"), TEXT("直接在盒体中配置 RT 输入层，用于实验分层预览。")},
@@ -193,53 +194,16 @@ void Apply(bool bChinese)
         {TEXT("FixedColor"), TEXT("固定颜色替换")},
     };
     TranslateEnum(TEXT("/Script/Engine.EDeferredToonDirectSpecularColorMode"), SpecularColorModes, bChinese);
-    const FEnumText Enum1[] = {
-        {TEXT("NativeComposite"), TEXT("0 - 当前输出")},
-        {TEXT("BoxInfluence"), TEXT("1 - 盒体影响范围")},
-        {TEXT("ShadowComposite"), TEXT("2 - 合成阴影")},
-        {TEXT("Priority"), TEXT("3 - 优先级")},
-        {TEXT("DirectLight"), TEXT("4 - 直接光")},
-        {TEXT("NativeShadow"), TEXT("5 - 原生阴影")},
-        {TEXT("ShadowChannel"), TEXT("6 - 艺术阴影通道")},
-        {TEXT("BaseColor"), TEXT("7 - 材质底色")},
-        {TEXT("WorldNormal"), TEXT("8 - 世界空间法线")},
-        {TEXT("AmbientOcclusion"), TEXT("9 - 屏幕空间 AO")},
-        {TEXT("StyleMask"), TEXT("10 - 分层遮罩")},
-        {TEXT("StyleColor"), TEXT("11 - 分层颜色")},
-        {TEXT("Depth"), TEXT("12 - 线性深度")},
-        {TEXT("Velocity"), TEXT("13 - 运动速度")},
-        {TEXT("DirectLightMask"), TEXT("14 - 直接光遮罩")},
-        {TEXT("CombinedShadowMask"), TEXT("17 - 组合阴影遮罩")},
-        {TEXT("SpecularDirectLight"), TEXT("18 - 有效直接光高光")},
-        {TEXT("ToonShadowMask"), TEXT("19 - 卡通阴影遮罩")},
-        {TEXT("ToonBinaryShadowMask"), TEXT("20 - 卡通二分阴影遮罩")},
-        {TEXT("DirectLightFacing"), TEXT("21 - 朝向受光（N·L）")},
-        {TEXT("EffectiveDirectLight"), TEXT("22 - 有效直接漫反射")},
-        {TEXT("EffectiveLightResponse"), TEXT("23 - 有效受光响应")},
-        {TEXT("LightBandValue"), TEXT("24 - 所选明暗档位（0 暗 / 1 亮）")},
-        {TEXT("IndirectDiffuse"), TEXT("25 - 间接漫反射")},
-        {TEXT("IndirectDiffuseCoverage"), TEXT("26 - 间接漫反射数据有效性")},
-        {TEXT("SkyDiffuseBeforeAO"), TEXT("27 - 天光漫反射（AO 前）")}, // [DeferredToon]
-        {TEXT("SkyOcclusion"), TEXT("28 - 天光综合遮蔽（白为无遮挡）")},
-        {TEXT("SkyOcclusionCoverage"), TEXT("29 - 天光遮蔽数据有效性")},
-        {TEXT("LumenShortRangeAO"), TEXT("30 - Lumen 短程 AO（白为无遮挡）")},
-        {TEXT("LumenDiffuseBeforeShortAO"), TEXT("31 - Lumen 漫反射（短程 AO 前）")},
-        {TEXT("LumenShortRangeAOCoverage"), TEXT("32 - Lumen 短程 AO 数据有效性")},
-        {TEXT("IndirectOcclusion"), TEXT("33 - 间接漫反射综合遮蔽（自动）")},
-        {TEXT("IndirectDiffuseBeforeOcclusion"), TEXT("34 - 遮蔽前间接漫反射（自动）")},
-        {TEXT("IndirectOcclusionCoverage"), TEXT("35 - 综合遮蔽数据有效性")},
-        {TEXT("IndirectOcclusionSource"), TEXT("36 - 遮蔽来源（青=Lumen，橙=天光，黑=无）")},
-        {TEXT("IndirectDiffuseBand"), TEXT("37 - 间接漫反射二分遮罩")},
-        {TEXT("IndirectOcclusionBand"), TEXT("38 - 遮蔽二分遮罩（白为无遮挡）")},
-        {TEXT("DirectSpecularMask"), TEXT("39 - 直接高光硬边遮罩")},
-        {TEXT("StyledDirectSpecular"), TEXT("40 - 风格化直接光高光")},
-        {TEXT("IndirectSpecular"), TEXT("41 - 间接镜面反射（环境反射）")},
-        {TEXT("IndirectSpecularCoverage"), TEXT("42 - 间接镜面反射可用范围")},
-        {TEXT("Emissive"), TEXT("43 - 材质自发光")},
-        {TEXT("EmissiveCoverage"), TEXT("44 - 材质自发光可用范围")},
-        {TEXT("ConsoleGlobal"), TEXT("跟随全局 / 控制台")},
-    };
-    TranslateEnum(TEXT("/Script/Engine.EDeferredToonDebugView"), Enum1, bChinese);
+    // Use the same public numbering as the renderer CVar; saved enum values never change.
+    for (const DeferredToonDebugViews::FEntry& Entry : DeferredToonDebugViews::Entries)
+    {
+        if (Entry.bHidden) { continue; }
+        const FString Label = FString::Printf(TEXT("%d - %s"), Entry.PublicIndex, Entry.Chinese);
+        const FEnumText Texts[] = {{Entry.Name, *Label}};
+        TranslateEnum(TEXT("/Script/Engine.EDeferredToonDebugView"), Texts, bChinese);
+    }
+    const FEnumText FollowGlobal[] = {{TEXT("ConsoleGlobal"), TEXT("跟随全局 / 控制台")}};
+    TranslateEnum(TEXT("/Script/Engine.EDeferredToonDebugView"), FollowGlobal, bChinese);
     const FEnumText Enum2[] = {
         {TEXT("StyleProfile"), TEXT("风格数据资产")},
         {TEXT("InlineLayers"), TEXT("盒体内配置")},
