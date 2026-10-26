@@ -320,7 +320,6 @@ void FSceneTexturesConfig::Init(const FSceneTexturesConfigInitSettings& InitSett
 				BindingCache.Bindings[Layout].GBufferD = FindGBufferBindingByName(GBufferInfo, TEXT("GBufferD"), ShaderPlatform);
 				BindingCache.Bindings[Layout].GBufferE = FindGBufferBindingByName(GBufferInfo, TEXT("GBufferE"), ShaderPlatform);
 				BindingCache.Bindings[Layout].GBufferVelocity = FindGBufferBindingByName(GBufferInfo, TEXT("Velocity"), ShaderPlatform);
-                BindingCache.Bindings[Layout].ToonEmissive = GetToonEmissiveBinding(GBufferParams[Layout]);
 
 				// Remove DisableDCC flag for velocity. Only Nanite fast tile clear sets this flag currently
 				// but we want to exclude velocity because it usually doesn't have many written pixels
@@ -392,7 +391,6 @@ uint32 FSceneTexturesConfig::GetGBufferRenderTargetsInfo(FGraphicsPipelineRender
 		IncludeBindingIfValid(Bindings.GBufferD);
 		IncludeBindingIfValid(Bindings.GBufferE);
 		IncludeBindingIfValid(Bindings.GBufferVelocity);
-        IncludeBindingIfValid(Bindings.ToonEmissive);
 	}
 	// Forward shading path. Simple forward shading does not use velocity.
 	else if (IsUsingBasePassVelocity(ShaderPlatform))

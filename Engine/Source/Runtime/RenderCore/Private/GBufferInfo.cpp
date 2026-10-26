@@ -598,30 +598,3 @@ FGBufferInfo RENDERCORE_API FetchFullGBufferInfo(const FGBufferParams& Params)
 		return FetchLegacyGBufferInfo(Params);
 	}
 }
-
-// [DeferredToon] Append an MRT without changing the generated GBuffer encoding.
-// The native opaque layout has at most seven targets; water uses its own eighth slot.
-FGBufferBinding GetToonEmissiveBinding(const FGBufferParams& Params)
-{
-    FGBufferBinding Binding;
-    if (!IsMobilePlatform(Params.ShaderPlatform) && !IsForwardShadingEnabled(Params.ShaderPlatform)
-        && !Substrate::IsSubstrateEnabled())
-    {
-        const FGBufferInfo Info = FetchFullGBufferInfo(Params);
-        // SM5 pixel UAVs share eight output slots with MRTs; VT feedback needs one.
-        const bool bReserveVTSlot = GetMaxSupportedFeatureLevel(Params.ShaderPlatform) == ERHIFeatureLevel::SM5
-            && UseVirtualTexturing(Params.ShaderPlatform);
-        if (Info.NumTargets < FGBufferInfo::MaxTargets - (bReserveVTSlot ? 1 : 0))
-        {
-            Binding.Index = Info.NumTargets;
-            Binding.Format = PF_FloatRGBA;
-            Binding.Flags = TexCreate_ShaderResource | TexCreate_RenderTargetable;
-            if (DoesPlatformSupportNanite(Params.ShaderPlatform, true))
-            {
-                Binding.Flags |= TexCreate_UAV;
-                if (UseNaniteFastTileClear()) { Binding.Flags |= TexCreate_DisableDCC; }
-            }
-        }
-    }
-    return Binding;
-}

@@ -786,13 +786,6 @@ void FSceneTextures::InitializeViewFamily(FRDGBuilder& GraphBuilder, FViewFamily
 			SceneTextures.GBufferE = GraphBuilder.CreateTexture(Desc, TEXT("GBufferE"));
 		}
 
-        if (Bindings.ToonEmissive.Index >= 0)
-        {
-            const FRDGTextureDesc Desc = FRDGTextureDesc::CreateRenderTargetTextureDesc(Config.Extent, Bindings.ToonEmissive.Format,
-                FClearValueBinding::Transparent, Bindings.ToonEmissive.Flags, Config.bRequireMultiView, Config.MobileMultiViewRenderTargetNumLayers);
-            SceneTextures.ToonEmissive = GraphBuilder.CreateTexture(Desc, TEXT("DeferredToon.Emissive"));
-        }
-
 		// GBufferF is not yet part of the data driven GBuffer info.
 		if (Config.ShadingPath == EShadingPath::Deferred)
 		{
@@ -900,8 +893,7 @@ uint32 FSceneTextures::GetGBufferRenderTargets(
 			{ TEXT("GBufferC"), GBufferC, Bindings.GBufferC.Index },
 			{ TEXT("GBufferD"), GBufferD, Bindings.GBufferD.Index },
 			{ TEXT("GBufferE"), GBufferE, Bindings.GBufferE.Index },
-			{ TEXT("Velocity"), Velocity, Bindings.GBufferVelocity.Index },
-            { TEXT("ToonEmissive"), ToonEmissive, Bindings.ToonEmissive.Index }
+			{ TEXT("Velocity"), Velocity, Bindings.GBufferVelocity.Index }
 		};
 
 		for (const FGBufferEntry& Entry : GBufferEntries)
@@ -982,7 +974,6 @@ TArray<FRDGTextureRef> FSceneTextures::EnumerateSceneTextures() const
 	AddTextureIfNonNull(EffectiveLightBuffer, Results); // [DeferredToon]
 	AddTextureIfNonNull(ToonIndirectDiffuse, Results); // [DeferredToon]
 	AddTextureIfNonNull(ToonIndirectSpecular, Results); // [DeferredToon]
-    AddTextureIfNonNull(ToonEmissive, Results);
 	AddTextureIfNonNull(ToonSkyDiffuseBeforeAO, Results); // [DeferredToon]
 	AddTextureIfNonNull(ToonLumenDiffuseBeforeShortAO, Results); // [DeferredToon]
 	AddTextureIfNonNull(QuadOverdraw, Results);

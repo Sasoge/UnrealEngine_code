@@ -168,7 +168,6 @@ struct FSceneTextures : public FMinimalSceneTextures
 	FRDGTextureRef ToonIndirectDiffuse{};
 	// [DeferredToon] Native indirect specular only; pre-exposed RGB, A coverage.
 	FRDGTextureRef ToonIndirectSpecular{};
-    FRDGTextureRef ToonEmissive{}; // Pre-exposed material emission, A=coverage.
 	// [DeferredToon] Sky-only split: pre-exposed RGB before AO, A visibility; -1 invalid.
 	FRDGTextureRef ToonSkyDiffuseBeforeAO{};
 	// [DeferredToon] Lumen RGB before short AO, alpha raw visibility; -1 invalid.

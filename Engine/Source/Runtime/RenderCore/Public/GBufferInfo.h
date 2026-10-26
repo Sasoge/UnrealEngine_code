@@ -277,7 +277,6 @@ struct FGBufferBindings
 	FGBufferBinding GBufferD;
 	FGBufferBinding GBufferE;
 	FGBufferBinding GBufferVelocity;
-	FGBufferBinding ToonEmissive; // Independent material emission, not baked base-pass lighting.
 };
 
 struct FGBufferInfo
@@ -331,7 +330,6 @@ inline FGBufferBinding FindGBufferBindingByName(const FGBufferInfo& GBufferInfo,
 }
 
 FGBufferInfo RENDERCORE_API FetchFullGBufferInfo(const FGBufferParams& Params);
-FGBufferBinding RENDERCORE_API GetToonEmissiveBinding(const FGBufferParams& Params);
 
 bool RENDERCORE_API IsGBufferInfoEqual(const FGBufferInfo& Lhs, const FGBufferInfo& Rhs);
 
