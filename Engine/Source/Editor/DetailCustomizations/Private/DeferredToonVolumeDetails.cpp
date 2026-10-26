@@ -1,4 +1,4 @@
-﻿// [DeferredToon] Keep rendering/serialization independent from editor presentation.
+// [DeferredToon] Keep rendering/serialization independent from editor presentation.
 #include "DeferredToonVolumeDetails.h"
 #include "DeferredToonDetailsLanguage.h"
 #include "Containers/Ticker.h"
@@ -69,6 +69,7 @@ void FDeferredToonVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBu
         {TEXT("Toon Bands"), FText::FromString(bChinese ? TEXT("风格化 | 明暗分档") : TEXT("Toon | Light Bands")), false},
         {TEXT("Toon Palette"), FText::FromString(bChinese ? TEXT("风格化 | 配色") : TEXT("Toon | Colors")), false},
         {TEXT("Toon Specular"), FText::FromString(bChinese ? TEXT("风格化 | 直接光高光") : TEXT("Toon | Direct Specular")), true}, // [DeferredToon]
+        {TEXT("Toon Emissive"), FText::FromString(bChinese ? TEXT("风格化 | 自发光") : TEXT("Toon | Emissive")), true},
         {TEXT("Toon Reflections"), FText::FromString(bChinese ? TEXT("风格化 | 环境镜面反射") : TEXT("Toon | Environment Reflections")), true},
         {TEXT("Toon Indirect"), FText::FromString(bChinese ? TEXT("风格化 | 间接漫反射") : TEXT("Toon | Indirect Diffuse")), true}, // [DeferredToon]
         {TEXT("Toon Occlusion"), FText::FromString(bChinese ? TEXT("风格化 | 间接漫反射遮蔽") : TEXT("Toon | Indirect Diffuse Occlusion")), true}, // [DeferredToon]
@@ -83,8 +84,8 @@ void FDeferredToonVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBu
     .WholeRowContent()
     [
         SNew(STextBlock).AutoWrapText(true).Text(FText::FromString(bChinese
-            ? TEXT("自动选择有效来源：Lumen 短程 AO / 普通天光综合遮蔽。33 查看原始遮蔽，36 查看来源，38 查看遮蔽二分。单独处理 AO 时无需开启整层间接光调色或二分。旧分路参数保留在高级设置中。")
-            : TEXT("Auto source: Lumen short-range AO / dynamic sky occlusion. View 33: raw AO; 36: source; 38: AO two-tone mask. AO-only processing needs no whole-layer indirect grading or quantization. Legacy settings remain under Advanced.")))
+            ? TEXT("自动选择有效来源：Lumen 短程 AO / 普通天光综合遮蔽。50 查看原始遮蔽，54 查看来源，51 查看遮蔽二分。单独处理 AO 时无需开启整层间接光调色或二分。旧分路参数保留在高级设置中。")
+            : TEXT("Auto source: Lumen short-range AO / dynamic sky occlusion. View 50: raw AO; 54: source; 51: AO two-tone mask. AO-only processing needs no whole-layer indirect grading or quantization. Legacy settings remain under Advanced.")))
     ];
     TArray<TPair<FName, FText>> SectionLabels;
     SectionLabels.Emplace(TEXT("Toon Language"), FText::FromString(TEXT("界面语言 / Language")));

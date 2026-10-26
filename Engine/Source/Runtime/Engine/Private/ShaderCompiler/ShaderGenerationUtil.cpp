@@ -323,7 +323,7 @@ static FShaderInitialDefinesInitializer GInitialDefinesInitializer;
 
 
 // if we change the logic, increment this number to force a DDC key change
-static const int32 GBufferGeneratorVersion = 5;
+static const int32 GBufferGeneratorVersion = 7; // [DeferredToon] Independent emissive MRT.
 
 static FShaderGlobalDefines FetchShaderGlobalDefines(EShaderPlatform TargetPlatform, EGBufferLayout GBufferLayout)
 {
@@ -2168,6 +2168,25 @@ void FShaderCompileUtilities::ApplyDerivedDefines(FShaderCompilerEnvironment& Ou
 		// something else, so no op
 	}
 
+    // [DeferredToon] The emission MRT is outside generated GBuffer encode/decode.
+    const FGBufferBinding ToonEmissive = GetToonEmissiveBinding(Params);
+    const bool bExportToonEmissive = MaterialDefines.IS_BASE_PASS && DerivedDefines.USES_GBUFFER
+        && !MaterialDefines.MATERIAL_SHADINGMODEL_SINGLELAYERWATER
+        && OutEnvironment.Definitions->GetIntegerValue(TEXT("MATERIAL_IS_SKY")) == 0
+        && (!SharedEnvironment || SharedEnvironment->Definitions->GetIntegerValue(TEXT("MATERIAL_IS_SKY")) == 0)
+        && ToonEmissive.Index >= 0;
+    // Shared material defines are merged after per-shader defines. Do not put a
+    // disabled default in the shared environment: it would override BasePass export.
+    if (MaterialDefines.IS_BASE_PASS)
+    {
+        OutEnvironment.SetDefine(TEXT("TOON_EMISSIVE_MRT_INDEX"), bExportToonEmissive ? ToonEmissive.Index : -1);
+    }
+    if (bExportToonEmissive)
+    {
+        TargetUsage[ToonEmissive.Index] = EGBufferSlotUsage::Written;
+        OutEnvironment.SetRenderTargetOutputFormat(ToonEmissive.Index, ToonEmissive.Format);
+    }
+
 	// Decide which pixel shader outputs are enabled based on which targets are written and what the first substrate
 	// target is based on which target slots are in use
 	int32 SubstrateFirstMRT = 0;
@@ -2206,6 +2225,7 @@ void FShaderCompileUtilities::AppendGBufferDDCKey(const EShaderPlatform Platform
 		KeyGen.AppendBoolInt(GlobalDefines.GBUFFER_HAS_VELOCITY);
 		KeyGen.AppendBoolInt(GlobalDefines.GBUFFER_HAS_TANGENT);
 		KeyGen.AppendBoolInt(GlobalDefines.ALLOW_STATIC_LIGHTING);
+        KeyGen.Append(GetToonEmissiveBinding(FShaderCompileUtilities::FetchGBufferParamsRuntime(Platform, (EGBufferLayout)Layout)).Index);
 	}
 	KeyGen.AppendSeparator();
 	KeyGen.Append(GBufferGeneratorVersion);

@@ -38,18 +38,18 @@ for s in ['r.AntiAliasingMethod 0','r.ScreenPercentage 100','ShowFlag.Tonemapper
 phases=[]
 for method,r,c in [('raw',0,0),('filtered',8,0),('clean',8,1)]:
     for i in range(5):
-        phases.append((f'p0-{method}-{i}',[lambda r=r:filter_radius(r),lambda c=c:cleanup(c),lambda:d(38)]))
+        phases.append((f'p0-{method}-{i}',[lambda r=r:filter_radius(r),lambda c=c:cleanup(c),lambda:d(51)]))
 for p in [1,2]:
     for method,r,c in [('raw',0,0),('clean',8,1)]:
-        phases.append((f'p{p}-{method}',[lambda p=p:pose(p),lambda r=r:filter_radius(r),lambda c=c:cleanup(c),lambda:d(38)]))
+        phases.append((f'p{p}-{method}',[lambda p=p:pose(p),lambda r=r:filter_radius(r),lambda c=c:cleanup(c),lambda:d(51)]))
 phases += [
     ('profile-clean',[lambda:pose(0),lambda:command('r.ProfileGPU.ShowUI 0'),lambda:command('r.ProfileGPU.Pattern *DeferredToon*')]),
     ('continuous',[lambda:pose(0),lambda:filter_debug(1)]),
     ('support',[lambda:filter_debug(2)]),
     ('geometry',[lambda:filter_debug(3)]),
-    ('provider',[lambda:filter_debug(0),lambda:d(36)]),
-    ('raw-visibility',[lambda:d(33)]),
-    ('tsr',[lambda:command('r.AntiAliasingMethod 4'),lambda:command('r.ScreenPercentage 67'),lambda:d(38)]),
+    ('provider',[lambda:filter_debug(0),lambda:d(54)]),
+    ('raw-visibility',[lambda:d(50)]),
+    ('tsr',[lambda:command('r.AntiAliasingMethod 4'),lambda:command('r.ScreenPercentage 67'),lambda:d(51)]),
     ('restored',[lambda:command('r.AntiAliasingMethod 0'),lambda:command('r.ScreenPercentage 100')]),
 ]
 shared=Path(__file__).with_name('verify_indirect_diffuse_editor.py').read_text(encoding='utf-8-sig')

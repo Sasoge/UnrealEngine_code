@@ -1,6 +1,8 @@
 #include "PostProcess/PostProcessDeferredToonVolumes.h"
 
 #include "DeferredToonVolumeSceneProxy.h"
+#include "DeferredToonDebugViews.h"
+#include "DeferredToonDebugPreview.h"
 #include "Engine/DeferredToonInputRegistry.h"
 #include "DataDrivenShaderPlatformInfo.h"
 #include "GlobalRenderResources.h"
@@ -35,8 +37,7 @@ namespace
 	TAutoConsoleVariable<int32> CVarDeferredToonVolumesDebugView(
 		TEXT("r.Toon.DeferredVolumes.DebugView"),
 		0,
-		// [DeferredToon] View 20 previews the new independent two-band output mask.
-		TEXT("Deferred toon volume debug view: 0 selected output mode, 1 weight, 2 volume color, 3 priority, 4-13 semantic layers, 14-20 binary reference masks, 21 raw DirectLightFacing (max N.L), 22 effective diffuse, 23 effective light response, 24 selected light band (0 dark / 1 light), 25 indirect diffuse (Lumen or dynamic sky), 26 indirect availability, 27 sky diffuse before AO, 28 sky combined AO (white=unoccluded), 29 sky split availability, 30 Lumen short AO, 31 Lumen diffuse before short AO, 32 Lumen short AO availability, 33 auto AO, 34 auto diffuse before AO, 35 auto availability, 36 provider (cyan=Lumen/orange=sky/black=none), 37 indirect two-tone mask, 38 AO two-tone mask (white=unoccluded), 39 direct specular hard mask, 40 styled direct specular, 41 native indirect specular (environment reflections), 42 indirect specular availability. 18 shows effective shadowed direct specular."),
+		DeferredToonDebugViews::GetConsoleHelp(),
 		ECVF_RenderThreadSafe);
 
     TAutoConsoleVariable<int32> CVarDeferredToonAOCleanup(
@@ -44,7 +45,7 @@ namespace
         TEXT("Remove tiny dark AO features with geometry-aware hard-mask opening. 0 disables; 1 enables (default)."), ECVF_RenderThreadSafe);
     TAutoConsoleVariable<int32> CVarDeferredToonAOFilterDebug(
         TEXT("r.Toon.DeferredVolumes.AOFilterDebug"), 0,
-        TEXT("Override view 38 only: 0 hard AO, 1 filtered continuous visibility, 2 filter support, 3 depth-derived normals, 4 accepted temporal history, 5 history rejection reason (white=accepted, gray=reset, cyan=outside, yellow=source, magenta=normal, red=plane, blue=motion, orange=insufficient coverage)."), ECVF_RenderThreadSafe);
+        TEXT("Override public debug view 51 only: 0 hard AO, 1 filtered continuous visibility, 2 filter support, 3 depth-derived normals, 4 accepted temporal history, 5 history rejection reason (white=accepted, gray=reset, cyan=outside, yellow=source, magenta=normal, red=plane, blue=motion, orange=insufficient coverage)."), ECVF_RenderThreadSafe);
 
     TAutoConsoleVariable<float> CVarDeferredToonAOHysteresis(
         TEXT("r.Toon.DeferredVolumes.AOHysteresis"), 0.04f,
@@ -304,6 +305,10 @@ namespace
             SHADER_PARAMETER(uint32, bIndirectSpecularAvailable)
             SHADER_PARAMETER(uint32, bOverrideIndirectSpecular)
             SHADER_PARAMETER(float, IndirectSpecularIntensity)
+            SHADER_PARAMETER_RDG_TEXTURE(Texture2D, EmissiveTexture)
+            SHADER_PARAMETER(uint32, bEmissiveAvailable)
+            SHADER_PARAMETER(uint32, bOverrideEmissive)
+            SHADER_PARAMETER(float, EmissiveIntensity)
             // [DeferredToon] Visible direct-specular band controls.
             SHADER_PARAMETER(uint32, bSpecularAvailable)
             SHADER_PARAMETER(uint32, DirectSpecularStyle)
@@ -390,6 +395,29 @@ namespace
 		}
 	}
 
+    // Resolve only in a scene containing the exact target component. Other editor worlds,
+    // PIE duplicates, thumbnails and scene/reflection captures must not inherit the preview.
+    static DeferredToonDebugPreview::FState ResolvePreview(
+        const FViewInfo& View, const TArray<FDeferredToonVolumeSceneProxy*>& Volumes)
+    {
+        const auto& State = DeferredToonDebugPreview::Get_RenderThread();
+        if (!View.bIsSceneCapture && !View.bIsReflectionCapture && State.bActive)
+        {
+            for (const auto* Volume : Volumes)
+            {
+                if (Volume && State.Matches(Volume->DebugPreviewKey)) { return State; }
+            }
+        }
+        return {};
+    }
+
+    static uint32 ResolveDebugView(const FDeferredToonVolumeSceneProxy& Volume,
+        const DeferredToonDebugPreview::FState& Preview)
+    {
+        if (Preview.bActive) { return uint32(Preview.ShaderId); }
+        return Volume.DebugView == 255u ? uint32(GetDeferredToonVolumeDebugView()) : FMath::Min<uint32>(Volume.DebugView, 44u);
+    }
+
 	static FScreenPassTextureSlice AddVolumePass(
 		FRDGBuilder& GraphBuilder,
 		const FViewInfo& View,
@@ -397,15 +425,12 @@ namespace
 		const FScreenPassTexture& OriginalSceneColor,
 		const FDeferredToonVolumeSceneProxy& Volume,
         const FDeferredToonAOTextures& SharedAO,
+        const DeferredToonDebugPreview::FState& Preview,
 		TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures)
 	{
 		const FScreenPassTexture Input = FScreenPassTexture::CopyFromSlice(GraphBuilder, SceneColor);
 		const FScreenPassTextureViewport InputViewport(Input);
-		// [DeferredToon] The details-panel selector is a per-volume remote
-		// control.  255 preserves the legacy global console variable path.
-		const uint32 DebugView = Volume.DebugView == 255u
-			? uint32(GetDeferredToonVolumeDebugView())
-			: FMath::Min<uint32>(Volume.DebugView, 42u); // [DeferredToon] Band preview appended; existing IDs preserved.
+        const uint32 DebugView = ResolveDebugView(Volume, Preview);
 		// [DeferredToon] A pooled post-process target can retain pixels outside a
 		// partial view rect. Those pixels become visible as rectangular blocks when
 		// the editor viewport or screen percentage changes. Clear every partial
@@ -484,6 +509,11 @@ namespace
         PassParameters->DirectSpecularColorMode = Volume.DirectSpecularColorMode;
         PassParameters->DirectSpecularColor = FVector4f(Volume.DirectSpecularColor);
         PassParameters->DirectSpecularIntensity = Volume.DirectSpecularIntensity;
+        const FRDGTextureRef EmissiveTexture = View.GetSceneTextures().ToonEmissive;
+        PassParameters->bEmissiveAvailable = EmissiveTexture && HasBeenProduced(EmissiveTexture) ? 1u : 0u;
+        PassParameters->EmissiveTexture = PassParameters->bEmissiveAvailable ? EmissiveTexture : GSystemTextures.GetBlackDummy(GraphBuilder);
+        PassParameters->bOverrideEmissive = Volume.bOverrideEmissive ? 1u : 0u;
+        PassParameters->EmissiveIntensity = Volume.EmissiveIntensity;
         PassParameters->bOverrideIndirectSpecular = Volume.bOverrideIndirectSpecular ? 1u : 0u;
         PassParameters->IndirectSpecularIntensity = Volume.IndirectSpecularIntensity;
         PassParameters->bOverrideIndirectDiffuse = Volume.bOverrideIndirectDiffuse ? 1u : 0u;
@@ -519,7 +549,7 @@ namespace
         PassParameters->AOMaskTexture = HardMask ? HardMask : GSystemTextures.GetBlackDummy(GraphBuilder);
         PassParameters->AOMomentsTexture = VolumeAO.Moments ? VolumeAO.Moments : GSystemTextures.GetBlackDummy(GraphBuilder);
         PassParameters->AOGeometryTexture = SharedAO.Geometry ? SharedAO.Geometry : GSystemTextures.GetBlackDummy(GraphBuilder);
-        PassParameters->AOFilterDebug = FMath::Clamp(CVarDeferredToonAOFilterDebug.GetValueOnRenderThread(), 0, 5);
+        PassParameters->AOFilterDebug = Preview.bActive ? Preview.AOFilterMode : FMath::Clamp(CVarDeferredToonAOFilterDebug.GetValueOnRenderThread(), 0, 5);
         PassParameters->bUnifiedIndirectOcclusion = Volume.bUnifiedIndirectOcclusion ? 1u : 0u; // [DeferredToon]
 		PassParameters->ShadowTextureWeight = Volume.ShadowTextureWeight;
 		PassParameters->ShadowTextureTiling = FVector2f(Volume.ShadowTextureTiling);
@@ -552,7 +582,19 @@ namespace
 
 int32 GetDeferredToonVolumeDebugView()
 {
-	return FMath::Clamp(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread(), 0, 42); // [DeferredToon] Appended indirect diffuse diagnostics.
+	return DeferredToonDebugViews::ToShaderId(CVarDeferredToonVolumesDebugView.GetValueOnRenderThread()); // Public console index -> stable shader ID.
+}
+
+bool ShouldPresentDeferredToonDebugView(const FViewInfo& View)
+{
+    if (DeferredToonDebugPreview::Get_RenderThread().bActive && CVarDeferredToonVolumes.GetValueOnRenderThread() > 0 && View.Family->Scene)
+    {
+        TArray<FDeferredToonVolumeSceneProxy*> Volumes;
+        View.Family->Scene->CollectDeferredToonVolumes(FBox(EForceInit::ForceInit), Volumes);
+        const auto Preview = ResolvePreview(View, Volumes);
+        if (Preview.bActive) { return Preview.ShaderId != 0; }
+    }
+    return GetDeferredToonVolumeDebugView() != 0;
 }
 
 FScreenPassTextureSlice AddDeferredToonVolumePass(
@@ -568,6 +610,13 @@ FScreenPassTextureSlice AddDeferredToonVolumePass(
 
 	TArray<FDeferredToonVolumeSceneProxy*> Volumes;
 	Scene->CollectDeferredToonVolumes(FBox(EForceInit::ForceInit), Volumes);
+    const auto Preview = ResolvePreview(View, Volumes);
+    if (Preview.bActive && Preview.ShaderId != 0)
+    {
+        // Diagnostic output is fullscreen. Prevent another overlapping volume from
+        // grading it or replacing it with a different saved debug view.
+        Volumes.RemoveAll([&Preview](const auto* Volume) { return !Preview.Matches(Volume->DebugPreviewKey); });
+    }
 	FScreenPassTextureSlice Current = Inputs.SceneColor;
 	// [DeferredToon] Resolve once, not once per box, to avoid repeated residual subtraction.
 	const FScreenPassTexture OriginalSceneColor = FScreenPassTexture::CopyFromSlice(GraphBuilder, Inputs.SceneColor);
@@ -575,7 +624,7 @@ FScreenPassTextureSlice AddDeferredToonVolumePass(
     FDeferredToonAOTextures SharedAO;
     for (const FDeferredToonVolumeSceneProxy* Volume : Volumes)
     {
-        if (Volume && NeedsHardAO(*Volume, Volume->DebugView == 255u ? uint32(GetDeferredToonVolumeDebugView()) : Volume->DebugView))
+        if (Volume && NeedsHardAO(*Volume, ResolveDebugView(*Volume, Preview)))
         {
             SharedAO = AddAOFilter(GraphBuilder, View, OriginalSceneColor, Inputs.SceneTextures);
             if (SharedAO.Geometry && View.ViewState && !View.bStatePrevViewInfoIsReadOnly
@@ -590,7 +639,7 @@ FScreenPassTextureSlice AddDeferredToonVolumePass(
 	{
 		if (Volume)
 		{
-			Current = AddVolumePass(GraphBuilder, View, Current, OriginalSceneColor, *Volume, SharedAO, Inputs.SceneTextures);
+			Current = AddVolumePass(GraphBuilder, View, Current, OriginalSceneColor, *Volume, SharedAO, Preview, Inputs.SceneTextures);
 		}
 	}
 	return Current;
